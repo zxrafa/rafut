@@ -8,6 +8,7 @@
 # - Requer configuração de chave de API.
 # ----------------------------------------------------------------------
 
+from keep_alive import keep_alive
 import discord
 from discord.ext import commands
 import requests
@@ -23,7 +24,7 @@ from keep_alive import keep_alive
 import google.generativeai as genai
 
 # --- CONFIGURAÇÕES GERAIS ---
-BOT_PREFIX = "R!"
+BOT_PREFIX = "--"
 PASTEBIN_URL = "https://pastebin.com/raw/YpjKyzdw"
 USER_DATA_FILE = "/data/rafutbot_user_data.json"
 CONTRACTED_PLAYERS_FILE = "/data/rafutbot_contracted_players.json"
