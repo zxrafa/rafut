@@ -1,12 +1,11 @@
 # -*- coding: utf-8 -*-
 # ----------------------------------------------------------------------
-# RafutBot V15 - Versão Definitiva com Narração por IA
+# RafutBot - Versão Definitiva Completa
 # ----------------------------------------------------------------------
 # Esta versão inclui todas as funcionalidades e correções para
-# hospedagem persistente no Railway.
+# hospedagem persistente.
 # ----------------------------------------------------------------------
 
-from keep_alive import keep_alive
 import discord
 from discord.ext import commands
 import requests
