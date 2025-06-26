@@ -6,6 +6,7 @@
 # hospedagem persistente.
 # ----------------------------------------------------------------------
 
+from keep_alive import keep_alive
 import discord
 from discord.ext import commands
 import requests
@@ -21,7 +22,7 @@ from keep_alive import keep_alive
 import google.generativeai as genai
 
 # --- CONFIGURAÇÕES GERAIS ---
-BOT_PREFIX = "R!"
+BOT_PREFIX = "--"
 PASTEBIN_URL = "https://pastebin.com/raw/YpjKyzdw"
 # Caminhos de arquivo para persistência no Railway/Render (Volume)
 USER_DATA_FILE = "/data/rafutbot_user_data.json"
