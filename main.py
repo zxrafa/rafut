@@ -703,4 +703,3 @@ if __name__ == "__main__":
         bot.run(TOKEN)
     else:
         print("ERRO: Token do Discord não encontrado nas variáveis de ambiente.")
-�
