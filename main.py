@@ -556,9 +556,6 @@ async def full_reset(ctx):
 async def full_reset_error(ctx, error):
     if isinstance(error, commands.MissingPermissions): await ctx.send("🚫 Você não tem permissão para usar este comando.")
 
-# --- EXECUÇÃO DO BOT ---
-if __name__ == "__main__":
-    TOKEN = "MTI2NDA4NDc4NDM3MjY0NTkzMA.GqkAvw.6I1Cn_Kahgi8er5LzbF-cYFyyK9gTEHVBWvEO0"
     keep_alive() # Mantém o bot vivo
-    bot.run(TOKEN)
+    client.run(os.getenv("TOKEN"))
 
