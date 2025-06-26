@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
 # ----------------------------------------------------------------------
-# RafutBot - Versão Definitiva Completa e Corrigida
+# RafutBot - Versão Definitiva com Visual Moderno
 # ----------------------------------------------------------------------
-# Esta versão inclui todas as funcionalidades e correções para
-# hospedagem persistente e erro de limite de caracteres do Discord.
+# Esta versão inclui todas as funcionalidades e uma nova geração
+# de imagem para o comando 'meutime'.
 # ----------------------------------------------------------------------
 
+from keep_alive import keep_alive
 import discord
 from discord.ext import commands
 import requests
@@ -45,7 +46,7 @@ except Exception as e:
 
 # --- MAPEAMENTO E INICIALIZAÇÃO ---
 SLOT_MAPPING = {"GOL": [0], "ZAG": [1, 2], "LE": [3], "LD": [4], "VOL": [5], "MC": [6], "MEI": [7], "PE": [8], "PD": [9], "CA": [10]}
-POSITIONS_COORDS = {0: (340, 780), 1: (170, 650), 2: (510, 650), 3: (50, 550), 4: (630, 550), 5: (340, 480), 6: (180, 350), 7: (500, 350), 8: (80, 180), 9: (580, 180), 10: (340, 150)}
+POSITIONS_COORDS = {0: (350, 780), 1: (180, 650), 2: (520, 650), 3: (60, 550), 4: (640, 550), 5: (350, 500), 6: (220, 370), 7: (480, 370), 8: (90, 200), 9: (610, 200), 10: (350, 160)}
 ALL_PLAYERS = []
 data_lock = asyncio.Lock()
 intents = discord.Intents.default(); intents.message_content = True; intents.members = True
@@ -90,68 +91,92 @@ async def generate_ai_narration(prompt_text, fallback_text):
         return fallback_text
 
 async def generate_team_image(team_players, user_name):
-    try:
-        bg_response = requests.get("https://i.imgur.com/gD4k33A.png"); bg_response.raise_for_status()
-        field_img = Image.open(BytesIO(bg_response.content)).convert("RGBA")
-    except requests.exceptions.RequestException:
-        field_img = Image.new('RGB', (700, 900), color='#065f46')
+    """Gera a imagem do time de forma mais rápida e realista."""
+    width, height = 700, 900
+    dark_green_top = (8, 43, 27)
+    dark_green_bottom = (4, 24, 15)
+    
+    field_img = Image.new("RGB", (width, height))
     draw = ImageDraw.Draw(field_img)
+
+    for y in range(height):
+        ratio = y / height
+        r = int(dark_green_top[0] * (1 - ratio) + dark_green_bottom[0] * ratio)
+        g = int(dark_green_top[1] * (1 - ratio) + dark_green_bottom[1] * ratio)
+        b = int(dark_green_top[2] * (1 - ratio) + dark_green_bottom[2] * ratio)
+        draw.line([(0, y), (width, y)], fill=(r, g, b))
+
     try:
-        title_font = ImageFont.truetype("arialbd.ttf", 40)
-        player_font_bold = ImageFont.truetype("arialbd.ttf", 18)
-        player_font_regular = ImageFont.truetype("arial.ttf", 16)
-        stats_font = ImageFont.truetype("arialbd.ttf", 22)
+        field_lines_response = requests.get("https://i.imgur.com/83zT2A9.png")
+        field_lines_img = Image.open(BytesIO(field_lines_response.content)).convert("RGBA")
+        field_img.paste(field_lines_img, (0,0), field_lines_img)
+    except Exception:
+        print("Aviso: Não foi possível carregar as linhas do campo.")
+
+    try:
+        title_font = ImageFont.truetype("arialbd.ttf", 42)
+        player_name_font = ImageFont.truetype("arialbd.ttf", 18)
+        player_stats_font = ImageFont.truetype("arial.ttf", 15)
+        team_stats_font = ImageFont.truetype("arialbd.ttf", 24)
     except IOError:
-        title_font = ImageFont.load_default()
-        player_font_bold = ImageFont.load_default()
-        player_font_regular = ImageFont.load_default()
-        stats_font = ImageFont.load_default()
+        title_font = player_name_font = player_stats_font = team_stats_font = ImageFont.load_default()
+
     title_text = f"Time de {user_name}"
-    draw.text((352, 32), title_text, font=title_font, fill="black", anchor="mt")
-    draw.text((350, 30), title_text, font=title_font, fill="white", anchor="mt")
-    total_overall = 0
-    total_value = 0
+    draw.text((350, 38), title_text, font=title_font, fill=(0,0,0,120), anchor="mt", stroke_width=2)
+    draw.text((350, 35), title_text, font=title_font, fill="#FFFFFF", anchor="mt")
+
+    total_overall = 0; total_value = 0
     for i, player in enumerate(team_players):
         x, y = POSITIONS_COORDS[i]
         if player:
-            total_overall += player['overall']
-            total_value += player['value']
+            total_overall += player['overall']; total_value += player['value']
             try:
                 player_img_response = requests.get(player["image"], timeout=5); player_img_response.raise_for_status()
-                player_img = Image.open(BytesIO(player_img_response.content))
+                player_img = Image.open(BytesIO(player_img_response.content)).convert("RGBA")
             except Exception:
                 try:
                     fallback_response = requests.get("https://i.imgur.com/M43Amw2.png", timeout=5); fallback_response.raise_for_status()
-                    player_img = Image.open(BytesIO(fallback_response.content))
-                except Exception: player_img = Image.new('RGB', (100, 100), color='grey')
-            await asyncio.sleep(0.1)
-            size = (100, 100)
-            mask = Image.new('L', size, 0)
+                    player_img = Image.open(BytesIO(fallback_response.content)).convert("RGBA")
+                except Exception: player_img = Image.new('RGBA', (100, 100), color='grey')
+            await asyncio.sleep(0.05)
+            
+            overall = player['overall']
+            if overall >= 90: border_color = (255, 215, 0, 200) # Gold
+            elif overall >= 85: border_color = (192, 192, 192, 200) # Silver
+            else: border_color = (205, 127, 50, 200) # Bronze
+
+            card_size = (110, 110)
+            draw.ellipse((x - card_size[0]//2, y - card_size[1]//2, x + card_size[0]//2, y + card_size[1]//2), fill=border_color)
+            
+            img_size = (100, 100)
+            mask = Image.new('L', img_size, 0)
             mask_draw = ImageDraw.Draw(mask)
-            mask_draw.ellipse((0, 0) + size, fill=255)
-            player_img = player_img.resize(size, Image.Resampling.LANCZOS)
-            border_size = 104
-            border_img = Image.new('RGBA', (border_size, border_size))
-            border_draw = ImageDraw.Draw(border_img)
-            border_draw.ellipse((0, 0, border_size-1, border_size-1), fill=(255, 255, 255, 60))
-            border_img.paste(player_img, (2, 2), mask)
-            field_img.paste(border_img, (x - border_size // 2, y - border_size // 2), border_img)
-            player_name_text = player['name']
-            player_stats_text = f"OVR: {player['overall']} | POS: {player['position']}"
-            draw.text((x+1, y + 57), player_name_text, font=player_font_bold, fill="black", anchor="mt")
-            draw.text((x, y + 56), player_name_text, font=player_font_bold, fill="white", anchor="mt")
-            draw.text((x+1, y + 76), player_stats_text, font=player_font_regular, fill="black", anchor="mt")
-            draw.text((x, y + 75), player_stats_text, font=player_font_regular, fill="yellow", anchor="mt")
+            mask_draw.ellipse((0, 0) + img_size, fill=255)
+            player_img = player_img.resize(img_size, Image.Resampling.LANCZOS)
+            
+            field_img.paste(player_img, (x - img_size[0] // 2, y - img_size[1] // 2), mask)
+
+            player_name_text = player['name'].split(' ')[0]
+            player_stats_text = f"OVR {player['overall']}"
+            
+            text_box_y = y + 60
+            draw.rounded_rectangle((x - 60, text_box_y, x + 60, text_box_y + 40), radius=5, fill=(0, 0, 0, 128))
+            draw.text((x, text_box_y + 8), player_name_text, font=player_name_font, fill="white", anchor="mt")
+            draw.text((x, text_box_y + 28), player_stats_text, font=player_stats_font, fill="yellow", anchor="mt")
         else:
-            draw.rectangle((x - 40, y - 40, x + 40, y + 40), outline="white", width=2)
-            draw.text((x, y), "?", fill="white", font=title_font, anchor="mm")
-    stats_text_overall = f"Overall Total do Time: {total_overall}"
-    stats_text_value = f"Valor de Mercado: R$ {total_value:,}"
-    draw.text((351, 851), stats_text_overall, font=stats_font, fill="black", anchor="ms")
-    draw.text((350, 850), stats_text_overall, font=stats_font, fill="white", anchor="ms")
-    draw.text((351, 881), stats_text_value, font=stats_font, fill="black", anchor="ms")
-    draw.text((350, 880), stats_text_value, font=stats_font, fill="yellow", anchor="ms")
-    img_byte_arr = BytesIO(); field_img.save(img_byte_arr, format='PNG'); img_byte_arr.seek(0)
+            draw.rectangle((x - 40, y - 40, x + 40, y + 40), outline=(255,255,255,100), width=2)
+            draw.text((x, y), "?", fill=(255,255,255,100), font=title_font, anchor="mm")
+
+    stats_overall_text = f"⭐ Overall Total: {total_overall}"
+    stats_value_text = f"💰 Valor de Mercado: R$ {total_value:,}"
+    draw.text((35, 852), stats_overall_text, font=team_stats_font, fill="black", anchor="ls", stroke_width=2)
+    draw.text((35, 850), stats_overall_text, font=team_stats_font, fill="white", anchor="ls")
+    draw.text((35, 882), stats_value_text, font=team_stats_font, fill="black", anchor="ls", stroke_width=2)
+    draw.text((35, 880), stats_value_text, font=team_stats_font, fill="#39FF14", anchor="ls")
+    
+    img_byte_arr = BytesIO()
+    field_img.save(img_byte_arr, format='PNG')
+    img_byte_arr.seek(0)
     return img_byte_arr
 
 # --- VIEWS DE INTERAÇÃO ---
@@ -213,7 +238,7 @@ class ContractView(discord.ui.View):
     async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user != self.ctx.author: return await interaction.response.send_message("Apenas o autor do comando pode navegar.", ephemeral=True)
         if self.current_index < len(self.results) - 1: self.current_index += 1; await self.create_embed(interaction)
-    @discord.ui.button(label="Comprar", style=discord.ButtonStyle.green, emoji="�")
+    @discord.ui.button(label="Comprar", style=discord.ButtonStyle.green, emoji="💸")
     async def buy_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user != self.ctx.author: return await interaction.response.send_message("Apenas o autor do comando pode comprar.", ephemeral=True)
         player_to_buy = self.results[self.current_index]
@@ -271,6 +296,8 @@ class ActionView(discord.ui.View):
 async def on_ready():
     print(f'🚀 {bot.user.name} V15 (IA e Persistência) está no ar!'); fetch_and_parse_players()
     await bot.change_presence(activity=discord.Game(name=f"Use {BOT_PREFIX}help"))
+
+# --- COMANDOS COMPLETOS ---
 
 @bot.command(name='help')
 async def help_command(ctx):
