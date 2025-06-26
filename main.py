@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
 # ----------------------------------------------------------------------
-# RafutBot - Versão Definitiva Completa
+# RafutBot - Versão Definitiva Completa e Corrigida
 # ----------------------------------------------------------------------
 # Esta versão inclui todas as funcionalidades e correções para
-# hospedagem persistente.
+# hospedagem persistente e erro de limite de caracteres do Discord.
 # ----------------------------------------------------------------------
 
+from keep_alive import keep_alive
 import discord
 from discord.ext import commands
 import requests
@@ -21,7 +22,7 @@ from keep_alive import keep_alive
 import google.generativeai as genai
 
 # --- CONFIGURAÇÕES GERAIS ---
-BOT_PREFIX = "R!"
+BOT_PREFIX = "--"
 PASTEBIN_URL = "https://pastebin.com/raw/YpjKyzdw"
 # Caminhos de arquivo para persistência no Railway/Render (Volume)
 USER_DATA_FILE = "/data/rafutbot_user_data.json"
@@ -463,7 +464,7 @@ async def ranking(ctx):
     if not sorted_users: return await ctx.send("🏆 **Ranking Vazio!**")
     embed = discord.Embed(title="🏆 Ranking de Vitórias - Top 10 🏆", color=discord.Color.purple())
     desc = []
-    medals = ["🥇", "🥈", "🥉"]
+    medals = ["🥇", "�", "🥉"]
     for i, (user_id, wins) in enumerate(sorted_users[:10]):
         try: user = await bot.fetch_user(int(user_id)); user_name = user.display_name
         except (discord.NotFound, ValueError): user_name = "Usuário Desconhecido"
@@ -559,14 +560,14 @@ async def confront(ctx, opponent: discord.Member):
         else:
             playmaker = random.choice(teams[attacker_id]["mid"]); attacker = random.choice(teams[attacker_id]["attack"]); defender = random.choice(teams[defender_id]["def"]); keeper = teams[defender_id]["keeper"]
             log_entry = f"⚡ {minute}' - **{playmaker['name']}** inicia o ataque! Ele lança para **{attacker['name']}**..."
-            match_log.append(log_entry); embed.set_field_at(1, name="Ao Vivo 🔴", value="```\n" + "\n".join(match_log[-7:]) + "\n```"); await match_message.edit(embed=embed)
+            match_log.append(log_entry); embed.set_field_at(1, name="Ao Vivo 🔴", value="```\n" + "\n".join(match_log[-5:]) + "\n```"); await match_message.edit(embed=embed)
             await asyncio.sleep(2)
             dribble_success = (attacker['overall'] - defender['overall']) > random.randint(-25, 25)
             if not dribble_success:
                 log_entry = f"🧱 **{defender['name']}** chega junto e corta a jogada! Que categoria do zagueirão."
             else:
                 log_entry = f"🏃‍♂️ **{attacker['name']}** passa por **{defender['name']}** e fica de frente pro gol! VAI CHUTAR..."
-                match_log.append(log_entry); embed.set_field_at(1, name="Ao Vivo 🔴", value="```\n" + "\n".join(match_log[-7:]) + "\n```"); await match_message.edit(embed=embed)
+                match_log.append(log_entry); embed.set_field_at(1, name="Ao Vivo 🔴", value="```\n" + "\n".join(match_log[-5:]) + "\n```"); await match_message.edit(embed=embed)
                 await asyncio.sleep(2.5)
                 shot_power = attacker['overall'] + random.randint(-10, 10); save_power = keeper['overall'] + random.randint(-15, 15)
                 outcome = random.choices(['goal', 'save', 'post', 'miss', 'penalty'], weights=[35, 30, 10, 15, 10], k=1)[0]
@@ -595,7 +596,7 @@ async def confront(ctx, opponent: discord.Member):
                 else: log_entry = f"🤦‍♂️ PRA FORA! Que chance perdida por **{attacker['name']}**! Ele isolou a bola!"
         match_log.append(log_entry)
         embed.set_field_at(0, name="Placar", value=f"🔵 {score[author.id]} - {score[opponent.id]} 🔴")
-        embed.set_field_at(1, name="Ao Vivo 🔴", value="```\n" + "\n".join(match_log[-6:]) + "\n```")
+        embed.set_field_at(1, name="Ao Vivo 🔴", value="```\n" + "\n".join(match_log[-5:]) + "\n```")
         if minute == 45: match_log.append("\n⏸️ **FIM DO PRIMEIRO TEMPO!**\n")
         await match_message.edit(embed=embed)
     await asyncio.sleep(3)
@@ -702,4 +703,4 @@ if __name__ == "__main__":
         bot.run(TOKEN)
     else:
         print("ERRO: Token do Discord não encontrado nas variáveis de ambiente.")
-
+�
