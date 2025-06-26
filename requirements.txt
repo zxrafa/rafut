@@ -1,0 +1,4 @@
+Pillow
+discord-py
+flask
+requests
