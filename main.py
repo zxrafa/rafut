@@ -6,7 +6,6 @@
 # hospedagem persistente e erro de limite de caracteres do Discord.
 # ----------------------------------------------------------------------
 
-from keep_alive import keep_alive
 import discord
 from discord.ext import commands
 import requests
@@ -92,17 +91,31 @@ async def generate_ai_narration(prompt_text, fallback_text):
 
 async def generate_team_image(team_players, user_name):
     try:
-        bg_response = requests.get("https://i.imgur.com/8Nqb1aG.png"); bg_response.raise_for_status()
+        bg_response = requests.get("https://i.imgur.com/gD4k33A.png"); bg_response.raise_for_status()
         field_img = Image.open(BytesIO(bg_response.content)).convert("RGBA")
-    except requests.exceptions.RequestException: field_img = Image.new('RGB', (700, 900), color='#065f46')
+    except requests.exceptions.RequestException:
+        field_img = Image.new('RGB', (700, 900), color='#065f46')
     draw = ImageDraw.Draw(field_img)
     try:
-        title_font = ImageFont.truetype("arialbd.ttf", 36); player_font = ImageFont.truetype("arial.ttf", 16)
-    except IOError: title_font = ImageFont.load_default(); player_font = ImageFont.load_default()
-    draw.text((350, 30), f"Time de {user_name}", fill="white", font=title_font, anchor="mt")
+        title_font = ImageFont.truetype("arialbd.ttf", 40)
+        player_font_bold = ImageFont.truetype("arialbd.ttf", 18)
+        player_font_regular = ImageFont.truetype("arial.ttf", 16)
+        stats_font = ImageFont.truetype("arialbd.ttf", 22)
+    except IOError:
+        title_font = ImageFont.load_default()
+        player_font_bold = ImageFont.load_default()
+        player_font_regular = ImageFont.load_default()
+        stats_font = ImageFont.load_default()
+    title_text = f"Time de {user_name}"
+    draw.text((352, 32), title_text, font=title_font, fill="black", anchor="mt")
+    draw.text((350, 30), title_text, font=title_font, fill="white", anchor="mt")
+    total_overall = 0
+    total_value = 0
     for i, player in enumerate(team_players):
         x, y = POSITIONS_COORDS[i]
         if player:
+            total_overall += player['overall']
+            total_value += player['value']
             try:
                 player_img_response = requests.get(player["image"], timeout=5); player_img_response.raise_for_status()
                 player_img = Image.open(BytesIO(player_img_response.content))
@@ -111,14 +124,33 @@ async def generate_team_image(team_players, user_name):
                     fallback_response = requests.get("https://i.imgur.com/M43Amw2.png", timeout=5); fallback_response.raise_for_status()
                     player_img = Image.open(BytesIO(fallback_response.content))
                 except Exception: player_img = Image.new('RGB', (100, 100), color='grey')
-            await asyncio.sleep(0.6)
-            size = (100, 100); mask = Image.new('L', size, 0); mask_draw = ImageDraw.Draw(mask)
-            mask_draw.ellipse((0, 0) + size, fill=255); player_img = player_img.resize(size, Image.Resampling.LANCZOS)
-            field_img.paste(player_img, (x - size[0] // 2, y - size[1] // 2), mask)
-            draw.text((x, y + 60), f"{player['name']} ({player['overall']})", fill="white", font=player_font, anchor="mt")
+            await asyncio.sleep(0.1)
+            size = (100, 100)
+            mask = Image.new('L', size, 0)
+            mask_draw = ImageDraw.Draw(mask)
+            mask_draw.ellipse((0, 0) + size, fill=255)
+            player_img = player_img.resize(size, Image.Resampling.LANCZOS)
+            border_size = 104
+            border_img = Image.new('RGBA', (border_size, border_size))
+            border_draw = ImageDraw.Draw(border_img)
+            border_draw.ellipse((0, 0, border_size-1, border_size-1), fill=(255, 255, 255, 60))
+            border_img.paste(player_img, (2, 2), mask)
+            field_img.paste(border_img, (x - border_size // 2, y - border_size // 2), border_img)
+            player_name_text = player['name']
+            player_stats_text = f"OVR: {player['overall']} | POS: {player['position']}"
+            draw.text((x+1, y + 57), player_name_text, font=player_font_bold, fill="black", anchor="mt")
+            draw.text((x, y + 56), player_name_text, font=player_font_bold, fill="white", anchor="mt")
+            draw.text((x+1, y + 76), player_stats_text, font=player_font_regular, fill="black", anchor="mt")
+            draw.text((x, y + 75), player_stats_text, font=player_font_regular, fill="yellow", anchor="mt")
         else:
             draw.rectangle((x - 40, y - 40, x + 40, y + 40), outline="white", width=2)
             draw.text((x, y), "?", fill="white", font=title_font, anchor="mm")
+    stats_text_overall = f"Overall Total do Time: {total_overall}"
+    stats_text_value = f"Valor de Mercado: R$ {total_value:,}"
+    draw.text((351, 851), stats_text_overall, font=stats_font, fill="black", anchor="ms")
+    draw.text((350, 850), stats_text_overall, font=stats_font, fill="white", anchor="ms")
+    draw.text((351, 881), stats_text_value, font=stats_font, fill="black", anchor="ms")
+    draw.text((350, 880), stats_text_value, font=stats_font, fill="yellow", anchor="ms")
     img_byte_arr = BytesIO(); field_img.save(img_byte_arr, format='PNG'); img_byte_arr.seek(0)
     return img_byte_arr
 
@@ -181,7 +213,7 @@ class ContractView(discord.ui.View):
     async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user != self.ctx.author: return await interaction.response.send_message("Apenas o autor do comando pode navegar.", ephemeral=True)
         if self.current_index < len(self.results) - 1: self.current_index += 1; await self.create_embed(interaction)
-    @discord.ui.button(label="Comprar", style=discord.ButtonStyle.green, emoji="💸")
+    @discord.ui.button(label="Comprar", style=discord.ButtonStyle.green, emoji="�")
     async def buy_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user != self.ctx.author: return await interaction.response.send_message("Apenas o autor do comando pode comprar.", ephemeral=True)
         player_to_buy = self.results[self.current_index]
@@ -381,7 +413,6 @@ async def set_player(ctx, *, query: str):
     user_data = await get_user_data(ctx.author.id)
     squad = user_data[str(ctx.author.id)]['squad']
     results = [p for p in squad if search_query in normalize_str(p['name'])]
-    
     if not results: return await ctx.send(f"Nenhum jogador encontrado no seu elenco com o nome: `{query}`")
     if len(results) == 1: await perform_escalar(ctx, results[0])
     else:
@@ -464,7 +495,7 @@ async def ranking(ctx):
     if not sorted_users: return await ctx.send("🏆 **Ranking Vazio!**")
     embed = discord.Embed(title="🏆 Ranking de Vitórias - Top 10 🏆", color=discord.Color.purple())
     desc = []
-    medals = ["🥇", "�", "🥉"]
+    medals = ["🥇", "🥈", "🥉"]
     for i, (user_id, wins) in enumerate(sorted_users[:10]):
         try: user = await bot.fetch_user(int(user_id)); user_name = user.display_name
         except (discord.NotFound, ValueError): user_name = "Usuário Desconhecido"
