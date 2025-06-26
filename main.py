@@ -556,6 +556,18 @@ async def full_reset(ctx):
 async def full_reset_error(ctx, error):
     if isinstance(error, commands.MissingPermissions): await ctx.send("🚫 Você não tem permissão para usar este comando.")
 
-    keep_alive() # Mantém o bot vivo
-    client.run(os.getenv("TOKEN"))
+# --- EXECUÇÃO DO BOT ---
+if __name__ == "__main__":
+    # Pega o token das variáveis de ambiente do Render
+    TOKEN = os.environ.get('DISCORD_TOKEN') 
+
+    # Mantém o bot vivo
+    keep_alive() 
+
+    # Roda o bot
+    if TOKEN:
+        bot.run(TOKEN)
+    else:
+        print("ERRO: Token do Discord não encontrado nas variáveis de ambiente.")
+
 
