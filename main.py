@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 # ----------------------------------------------------------------------
-# RafutBot V11 - Um bot de Dream Team com Cassino do Tigrinho (Versão Completa)
+# RafutBot V12 - Um bot de Dream Team com Comando Best Team
 # ----------------------------------------------------------------------
-# Esta versão inclui todas as funcionalidades e correções.
+# Esta versão inclui:
+# - Novo comando de admin 'bestteam' para montar o time dos sonhos.
 # ----------------------------------------------------------------------
-from keep_alive import keep_alive
+
 import discord
 from discord.ext import commands
 import requests
@@ -18,11 +19,11 @@ from PIL import Image, ImageDraw, ImageFont, UnidentifiedImageError
 from io import BytesIO
 
 # --- CONFIGURAÇÕES GERAIS ---
-BOT_PREFIX = "R!"
+BOT_PREFIX = "--"
 PASTEBIN_URL = "https://pastebin.com/raw/YpjKyzdw"
 USER_DATA_FILE = "rafutbot_user_data.json"
 CONTRACTED_PLAYERS_FILE = "rafutbot_contracted_players.json"
-INITIAL_MONEY = 5000000
+INITIAL_MONEY = 1000000000
 SALE_PERCENTAGE = 0.5
 
 # --- MAPEAMENTO DE POSIÇÕES E COORDENADAS ---
@@ -65,6 +66,7 @@ def fetch_and_parse_players():
     except Exception as e: print(f"❌ Erro ao carregar jogadores: {e}")
 
 async def generate_team_image(team_players, user_name):
+    # ... (código da função generate_team_image)
     try:
         bg_response = requests.get("https://i.imgur.com/8Nqb1aG.png"); bg_response.raise_for_status()
         field_img = Image.open(BytesIO(bg_response.content)).convert("RGBA")
@@ -203,17 +205,20 @@ class ActionView(discord.ui.View):
         await self.action_callback(self.ctx, player_to_act_on)
         for item in self.children: item.disabled = True
         await interaction.response.edit_message(view=self)
-        await self.message.delete()
+        try:
+            await self.message.delete()
+        except discord.NotFound:
+            pass
 
 # --- EVENTOS E COMANDOS ---
 @bot.event
 async def on_ready():
-    print(f'🚀 {bot.user.name} V11 (Tigrinho) está no ar!'); fetch_and_parse_players()
+    print(f'🚀 {bot.user.name} V12 (Best Team) está no ar!'); fetch_and_parse_players()
     await bot.change_presence(activity=discord.Game(name=f"Use {BOT_PREFIX}help"))
 
 @bot.command(name='help')
 async def help_command(ctx):
-    embed = discord.Embed(title="📜 Comandos do RafutBot 11.0 📜", color=discord.Color.gold())
+    embed = discord.Embed(title="📜 Comandos do RafutBot 12.0 📜", color=discord.Color.gold())
     embed.add_field(name="**Economia e Mercado**", value="-"*25, inline=False)
     embed.add_field(name=f"💰 `{BOT_PREFIX}saldo`", value="Mostra seu dinheiro.", inline=False)
     embed.add_field(name=f"💸 `{BOT_PREFIX}contratar <nome>`", value="Busca e contrata jogadores por nome/posição.", inline=False)
@@ -228,11 +233,94 @@ async def help_command(ctx):
     embed.add_field(name=f"🐯 `{BOT_PREFIX}tigrinho <quantia>`", value="Aposte sua grana no jogo do tigrinho!", inline=False)
     if ctx.author.guild_permissions.administrator:
         embed.add_field(name="👑 Comandos de Administrador 👑", value="-" * 25, inline=False)
+        embed.add_field(name=f"⭐ `{BOT_PREFIX}bestteam @usuario`", value="Monta o melhor time possível para um usuário.", inline=False)
         embed.add_field(name=f"💰 `{BOT_PREFIX}money @usuario <quantia>`", value="Dá ou remove dinheiro de um usuário.", inline=False)
         embed.add_field(name=f"🚨 `{BOT_PREFIX}fullreset`", value="Apaga TODOS os dados salvos do bot.", inline=False)
     await ctx.send(embed=embed)
 
-# --- COMANDOS COM BUSCA INTELIGENTE E OUTROS ---
+async def perform_escalar(ctx, player):
+    async with data_lock:
+        all_data = await get_user_data(ctx.author.id); user_id = str(ctx.author.id)
+        team = all_data[user_id]['team']
+        if any(p and p['name'] == player['name'] for p in team): return await ctx.send(f"**{player['name']}** já está escalado.")
+        position = player['position']
+        if position not in SLOT_MAPPING: return await ctx.send(f"Posição `{position}` inválida.")
+        valid_slots = SLOT_MAPPING[position]; empty_slot = next((i for i in valid_slots if team[i] is None), -1)
+        if empty_slot != -1:
+            team[empty_slot] = player; save_data(USER_DATA_FILE, all_data)
+            await ctx.send(f"✅ **{player['name']}** foi escalado como **{position}**!")
+        else: await ctx.send(f"🚫 **Posição Cheia!** Vagas de **{position}** ocupadas.")
+
+@bot.command(name='escalar')
+async def set_player(ctx, *, query: str):
+    search_query = normalize_str(query)
+    user_data = await get_user_data(ctx.author.id)
+    squad = user_data[str(ctx.author.id)]['squad']
+    results = [p for p in squad if search_query in normalize_str(p['name'])]
+    if not results: return await ctx.send(f"Nenhum jogador encontrado no seu elenco com o nome: `{query}`")
+    if len(results) == 1: await perform_escalar(ctx, results[0])
+    else:
+        view = ActionView(ctx, results, perform_escalar, "Escalar")
+        embed = await view.create_embed(); view.message = await ctx.send(embed=embed, view=view)
+
+async def perform_banco(ctx, player):
+    async with data_lock:
+        all_data = await get_user_data(ctx.author.id); user_id = str(ctx.author.id)
+        team = all_data[user_id]['team']
+        idx = next((i for i, p in enumerate(team) if p and p['name'] == player['name']), -1)
+        if idx == -1: return
+        player_name_unset = team[idx]['name']; team[idx] = None; save_data(USER_DATA_FILE, all_data)
+        await ctx.send(f"❌ **{player_name_unset}** foi para o banco de reservas.")
+
+@bot.command(name='banco')
+async def unset_player(ctx, *, query: str):
+    search_query = normalize_str(query)
+    user_data = await get_user_data(ctx.author.id)
+    team = user_data[str(ctx.author.id)]['team']
+    results = [p for p in team if p and search_query in normalize_str(p['name'])]
+    if not results: return await ctx.send(f"Nenhum jogador encontrado no seu time titular com o nome: `{query}`")
+    if len(results) == 1: await perform_banco(ctx, results[0])
+    else:
+        view = ActionView(ctx, results, perform_banco, "Mandar para o Banco")
+        embed = await view.create_embed(); view.message = await ctx.send(embed=embed, view=view)
+
+async def perform_vender(ctx, player):
+    async with data_lock:
+        user_data = await get_user_data(ctx.author.id); user_id = str(ctx.author.id)
+        team = user_data[user_id]['team']
+        for i, p_team in enumerate(team):
+            if p_team and p_team['name'] == player['name']: team[i] = None; break
+        sale_price = int(player['value'] * SALE_PERCENTAGE)
+        user_data[user_id]['money'] += sale_price
+        user_data[user_id]['squad'] = [p for p in user_data[user_id]['squad'] if p['name'] != player['name']]
+        contracted = load_data(CONTRACTED_PLAYERS_FILE); contracted = [p_name for p_name in contracted if p_name != player['name']]
+        save_data(USER_DATA_FILE, user_data); save_data(CONTRACTED_PLAYERS_FILE, contracted)
+    await ctx.send(f"💰 Você vendeu **{player['name']}** por **R$ {sale_price:,}**!")
+
+@bot.command(name='vender')
+async def sell_player(ctx, *, query: str):
+    search_query = normalize_str(query)
+    user_data = await get_user_data(ctx.author.id)
+    squad = user_data[str(ctx.author.id)]['squad']
+    results = [p for p in squad if search_query in normalize_str(p['name'])]
+    if not results: return await ctx.send(f"Nenhum jogador encontrado no seu elenco com o nome: `{query}`")
+    if len(results) == 1: await perform_vender(ctx, results[0])
+    else:
+        view = ActionView(ctx, results, perform_vender, "Vender")
+        embed = await view.create_embed(); view.message = await ctx.send(embed=embed, view=view)
+
+# ... (outros comandos permanecem aqui)
+# Cole os comandos restantes da V11 aqui para garantir a funcionalidade completa.
+@bot.command(name='contratar', aliases=['comprar'])
+async def contract_player(ctx, *, query: str):
+    search_query = normalize_str(query)
+    contracted = load_data(CONTRACTED_PLAYERS_FILE)
+    available_players = [p for p in ALL_PLAYERS if p["name"] not in contracted]
+    results = [p for p in available_players if search_query in normalize_str(p['name']) or search_query.upper() == p['position']]
+    if not results: return await ctx.send(f"😥 Nenhum jogador disponível encontrado para a busca: `{query}`")
+    results.sort(key=lambda p: p['value'], reverse=True)
+    view = ContractView(ctx, results)
+    embed = await view.create_embed(); view.message = await ctx.send(embed=embed, view=view)
 
 @bot.command(name='obter')
 @commands.cooldown(1, 300, commands.BucketType.user)
@@ -267,91 +355,6 @@ async def shop(ctx):
     embed = discord.Embed(title="🛒 Top 10 Jogadores da Loja 🛒", description=description, color=discord.Color.dark_gold())
     embed.set_footer(text=f"Use R!contratar <nome> para buscar e comprar.")
     await ctx.send(embed=embed)
-
-async def perform_escalar(ctx, player):
-    async with data_lock:
-        all_data = await get_user_data(ctx.author.id); user_id = str(ctx.author.id)
-        team = all_data[user_id]['team']
-        if any(p and p['name'] == player['name'] for p in team): return await ctx.send(f"**{player['name']}** já está escalado.")
-        position = player['position']
-        if position not in SLOT_MAPPING: return await ctx.send(f"Posição `{position}` inválida.")
-        valid_slots = SLOT_MAPPING[position]; empty_slot = next((i for i in valid_slots if team[i] is None), -1)
-        if empty_slot != -1:
-            team[empty_slot] = player; save_data(USER_DATA_FILE, all_data)
-            await ctx.send(f"✅ **{player['name']}** foi escalado como **{position}**!")
-        else: await ctx.send(f"🚫 **Posição Cheia!** Vagas de **{position}** ocupadas.")
-
-@bot.command(name='escalar')
-async def set_player(ctx, *, query: str):
-    search_query = normalize_str(query)
-    user_data = await get_user_data(ctx.author.id)
-    squad = user_data[str(ctx.author.id)]['squad']
-    results = [p for p in squad if search_query in normalize_str(p['name'])]
-
-    if not results: return await ctx.send(f"Nenhum jogador encontrado no seu elenco com o nome: `{query}`")
-    if len(results) == 1: await perform_escalar(ctx, results[0])
-    else:
-        view = ActionView(ctx, results, perform_escalar, "Escalar")
-        embed = await view.create_embed(); view.message = await ctx.send(embed=embed, view=view)
-
-async def perform_banco(ctx, player):
-    async with data_lock:
-        all_data = await get_user_data(ctx.author.id); user_id = str(ctx.author.id)
-        team = all_data[user_id]['team']
-        idx = next((i for i, p in enumerate(team) if p and p['name'] == player['name']), -1)
-        if idx == -1: return
-        player_name_unset = team[idx]['name']; team[idx] = None; save_data(USER_DATA_FILE, all_data)
-        await ctx.send(f"❌ **{player_name_unset}** foi para o banco de reservas.")
-
-@bot.command(name='banco')
-async def unset_player(ctx, *, query: str):
-    search_query = normalize_str(query)
-    user_data = await get_user_data(ctx.author.id)
-    team = user_data[str(ctx.author.id)]['team']
-    results = [p for p in team if p and search_query in normalize_str(p['name'])]
-
-    if not results: return await ctx.send(f"Nenhum jogador encontrado no seu time titular com o nome: `{query}`")
-    if len(results) == 1: await perform_banco(ctx, results[0])
-    else:
-        view = ActionView(ctx, results, perform_banco, "Mandar para o Banco")
-        embed = await view.create_embed(); view.message = await ctx.send(embed=embed, view=view)
-
-async def perform_vender(ctx, player):
-    async with data_lock:
-        user_data = await get_user_data(ctx.author.id); user_id = str(ctx.author.id)
-        team = user_data[user_id]['team']
-        for i, p_team in enumerate(team):
-            if p_team and p_team['name'] == player['name']: team[i] = None; break
-        sale_price = int(player['value'] * SALE_PERCENTAGE)
-        user_data[user_id]['money'] += sale_price
-        user_data[user_id]['squad'] = [p for p in user_data[user_id]['squad'] if p['name'] != player['name']]
-        contracted = load_data(CONTRACTED_PLAYERS_FILE); contracted = [p_name for p_name in contracted if p_name != player['name']]
-        save_data(USER_DATA_FILE, user_data); save_data(CONTRACTED_PLAYERS_FILE, contracted)
-    await ctx.send(f"💰 Você vendeu **{player['name']}** por **R$ {sale_price:,}**!")
-
-@bot.command(name='vender')
-async def sell_player(ctx, *, query: str):
-    search_query = normalize_str(query)
-    user_data = await get_user_data(ctx.author.id)
-    squad = user_data[str(ctx.author.id)]['squad']
-    results = [p for p in squad if search_query in normalize_str(p['name'])]
-
-    if not results: return await ctx.send(f"Nenhum jogador encontrado no seu elenco com o nome: `{query}`")
-    if len(results) == 1: await perform_vender(ctx, results[0])
-    else:
-        view = ActionView(ctx, results, perform_vender, "Vender")
-        embed = await view.create_embed(); view.message = await ctx.send(embed=embed, view=view)
-
-@bot.command(name='contratar', aliases=['comprar'])
-async def contract_player(ctx, *, query: str):
-    search_query = normalize_str(query)
-    contracted = load_data(CONTRACTED_PLAYERS_FILE)
-    available_players = [p for p in ALL_PLAYERS if p["name"] not in contracted]
-    results = [p for p in available_players if search_query in normalize_str(p['name']) or search_query.upper() == p['position']]
-    if not results: return await ctx.send(f"😥 Nenhum jogador disponível encontrado para a busca: `{query}`")
-    results.sort(key=lambda p: p['value'], reverse=True)
-    view = ContractView(ctx, results)
-    embed = await view.create_embed(); view.message = await ctx.send(embed=embed, view=view)
 
 @bot.command(name='elenco')
 async def squad(ctx):
@@ -518,6 +521,7 @@ async def confront(ctx, opponent: discord.Member):
     final_embed.add_field(name=f"Gols de {opponent.display_name}", value=opp_scorers, inline=True)
     await match_message.edit(embed=final_embed)
 
+# --- COMANDOS DE ADMINISTRADOR ---
 @bot.command(name='money')
 @commands.has_permissions(administrator=True)
 async def give_money(ctx, user: discord.Member, amount: int):
@@ -556,6 +560,47 @@ async def full_reset(ctx):
 async def full_reset_error(ctx, error):
     if isinstance(error, commands.MissingPermissions): await ctx.send("🚫 Você não tem permissão para usar este comando.")
 
+@bot.command(name='bestteam')
+@commands.has_permissions(administrator=True)
+async def best_team(ctx, user: discord.Member):
+    """Monta o melhor time possível para um usuário com jogadores disponíveis. (Apenas Admins)"""
+    if user.bot: return await ctx.send("Bots não podem ter times.")
+    await ctx.send(f"🤖 Montando o time dos sonhos para {user.mention}... Isso pode levar um momento.")
+    async with data_lock:
+        all_user_data = load_data(USER_DATA_FILE)
+        contracted_players = load_data(CONTRACTED_PLAYERS_FILE)
+        target_user_id = str(user.id)
+        if target_user_id not in all_user_data:
+            all_user_data[target_user_id] = {"squad": [], "team": [None] * 11, "wins": 0, "money": INITIAL_MONEY}
+        current_squad_names = {p['name'] for p in all_user_data[target_user_id].get("squad", [])}
+        contracted_players = [p_name for p_name in contracted_players if p_name not in current_squad_names]
+        all_user_data[target_user_id]['squad'] = []
+        all_user_data[target_user_id]['team'] = [None] * 11
+        new_team = [None] * 11
+        formation_slots = {
+            0: "GOL", 1: "ZAG", 2: "ZAG", 3: "LE", 4: "LD", 5: "VOL", 
+            6: "MC", 7: "MEI", 8: "PE", 9: "PD", 10: "CA"
+        }
+        used_player_names_for_team = set()
+        for slot_index, position in formation_slots.items():
+            candidates = [p for p in ALL_PLAYERS if p['position'] == position and p['name'] not in contracted_players and p['name'] not in used_player_names_for_team]
+            candidates.sort(key=lambda p: p['overall'], reverse=True)
+            if candidates:
+                best_player = candidates[0]
+                new_team[slot_index] = best_player
+                contracted_players.append(best_player['name'])
+                used_player_names_for_team.add(best_player['name'])
+        all_user_data[target_user_id]['team'] = new_team
+        all_user_data[target_user_id]['squad'] = [p for p in new_team if p]
+        save_data(USER_DATA_FILE, all_user_data)
+        save_data(CONTRACTED_PLAYERS_FILE, contracted_players)
+    await ctx.send(f"✅ Time dos sonhos montado para {user.mention}! Use `R!meutime` para ver o resultado.")
+
+@best_team.error
+async def best_team_error(ctx, error):
+    if isinstance(error, commands.MissingPermissions): await ctx.send("🚫 Você não tem permissão para usar este comando.")
+    elif isinstance(error, commands.MissingRequiredArgument): await ctx.send("Uso incorreto. Formato: `R!bestteam @usuario`")
+
 # --- EXECUÇÃO DO BOT ---
 if __name__ == "__main__":
     # Pega o token das variáveis de ambiente do Render
@@ -569,5 +614,3 @@ if __name__ == "__main__":
         bot.run(TOKEN)
     else:
         print("ERRO: Token do Discord não encontrado nas variáveis de ambiente.")
-
-
