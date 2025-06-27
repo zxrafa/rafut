@@ -94,7 +94,8 @@ async def generate_ai_narration(prompt_text, fallback_text):
 async def generate_team_image(team_players, user_name):
     """Gera a imagem do time com o novo fundo, cartas maiores e posição visível."""
     try:
-        background_url = "https://i.ibb.co/wh0Fdcjx/mermao.png"
+        # --- URL DO FUNDO ATUALIZADA ---
+        background_url = "https://i.ibb.co/5W8Rvh2F/uaaaa.png"
         background_response = requests.get(background_url)
         background_response.raise_for_status()
         field_img = Image.open(BytesIO(background_response.content)).convert("RGBA")
@@ -365,7 +366,7 @@ class TradeConfirmationView(discord.ui.View):
             # Atualizar time titular se necessário
             for i, p in enumerate(all_data[prop_id]['team']):
                 if p and p['name'] == self.offered_player['name']:
-                    all_data[prop_id]['team'][i] = None # Ou pode tentar encaixar o novo jogador
+                    all_data[prop_id]['team'][i] = None
             
             # Remover jogador requisitado do Target e adicionar o oferecido
             all_data[targ_id]['squad'] = [p for p in all_data[targ_id]['squad'] if p['name'] != self.requested_player['name']]
@@ -402,13 +403,13 @@ class TradeConfirmationView(discord.ui.View):
 # --- EVENTOS E COMANDOS ---
 @bot.event
 async def on_ready():
-    print(f'🚀 {bot.user.name} V16 (Novos Comandos) está no ar!'); fetch_and_parse_players()
+    print(f'🚀 {bot.user.name} V17 (Fundo Novo) está no ar!'); fetch_and_parse_players()
     await bot.change_presence(activity=discord.Game(name=f"Use {BOT_PREFIX}help"))
 
 # --- COMANDO HELP ATUALIZADO ---
 @bot.command(name='help')
 async def help_command(ctx):
-    embed = discord.Embed(title="📜 Comandos do RafutBot 16.0 📜", color=discord.Color.gold())
+    embed = discord.Embed(title="📜 Comandos do RafutBot 17.0 📜", color=discord.Color.gold())
     embed.add_field(name="**Diversão e Utilidades**", value="-"*25, inline=False)
     embed.add_field(name=f"📰 `{BOT_PREFIX}noticias`", value="Gera uma manchete de notícia (com IA!) sobre um jogador seu.", inline=False)
     embed.add_field(name=f"ℹ️ `{BOT_PREFIX}info <jogador>`", value="Mostra a ficha técnica de um jogador seu.", inline=False)
@@ -442,16 +443,206 @@ async def help_command(ctx):
     await ctx.send(embed=embed)
 
 
-# --- COMANDOS EXISTENTES (sem alterações, omitidos para brevidade) ---
-# ... (noticias, info, comparar, contratar, obter, saldo, etc...)
-# Mantive apenas os comandos novos e os que precisaram de alteração para a lógica de troca.
+@bot.command(name='noticias')
+async def news(ctx):
+    if not gemini_model: return await ctx.send("O serviço de notícias (IA) está indisponível no momento.")
+    user_data = await get_user_data(ctx.author.id)
+    squad = user_data[str(ctx.author.id)].get('squad')
+    if not squad: return await ctx.send("Você precisa ter jogadores no elenco para gerar notícias!")
+    player = random.choice(squad)
+    prompt = f"Crie uma manchete de notícia de futebol curta, criativa e engraçada sobre o jogador {player['name']}. Pode ser sobre um lance bizarro, uma declaração polêmica ou algo do dia a dia. Seja criativo. Apenas a manchete."
+    msg = await ctx.send(f"📰 Buscando as últimas fofocas sobre **{player['name']}** nos arquivos da IA...")
+    headline = await generate_ai_narration(prompt, f" manchete sobre {player['name']} não encontrada.")
+    embed = discord.Embed(title="🗞️ PLANTÃO RAFUTNEWS 🗞️", description=f"## \"{headline}\"", color=discord.Color.blurple())
+    embed.set_image(url=player['image'])
+    embed.set_footer(text=f"Uma fonte totalmente confiável, com certeza.")
+    await msg.edit(content="", embed=embed)
+
+@bot.command(name='info')
+async def info(ctx, *, query: str):
+    search_query = normalize_str(query)
+    user_data = await get_user_data(ctx.author.id)
+    squad = user_data[str(ctx.author.id)]['squad']
+    target_player = next((p for p in squad if search_query in normalize_str(p['name'])), None)
+    if not target_player: return await ctx.send(f"Jogador `{query}` não encontrado no seu elenco.")
+    embed = discord.Embed(title=f"Ficha Técnica - {target_player['name']}", color=discord.Color.dark_green())
+    embed.set_image(url=target_player['image'])
+    embed.add_field(name="Overall", value=f"**{target_player['overall']}** ⭐", inline=True)
+    embed.add_field(name="Posição", value=f"**{target_player['position']}**", inline=True)
+    embed.add_field(name="Valor de Mercado", value=f"**R$ {target_player['value']:,}** 💸", inline=False)
+    await ctx.send(embed=embed)
+
+@bot.command(name='comparar')
+async def compare(ctx, *, query: str):
+    try:
+        name1, name2 = [normalize_str(n.strip()) for n in query.split(',')]
+    except ValueError:
+        return await ctx.send("Formato inválido. Use: `--comparar <nome1>, <nome2>`")
+    user_data = await get_user_data(ctx.author.id)
+    squad = user_data[str(ctx.author.id)]['squad']
+    p1 = next((p for p in squad if name1 in normalize_str(p['name'])), None)
+    p2 = next((p for p in squad if name2 in normalize_str(p['name'])), None)
+    if not p1 or not p2: return await ctx.send("Um ou ambos os jogadores não foram encontrados no seu elenco.")
+    embed = discord.Embed(title=f"🆚 Comparação: {p1['name']} vs {p2['name']}", color=discord.Color.dark_orange())
+    def get_stat_comparison(stat_name, val1, val2):
+        if val1 > val2: return f"**{val1}** > {val2}"
+        elif val2 > val1: return f"{val1} < **{val2}**"
+        else: return f"{val1} = {val2}"
+    embed.add_field(name="Overall", value=get_stat_comparison("Overall", p1['overall'], p2['overall']), inline=False)
+    embed.add_field(name="Valor", value=get_stat_comparison("Valor", p1['value'], p2['value']), inline=False)
+    embed.add_field(name=p1['name'], value=f"**Pos:** {p1['position']}", inline=True)
+    embed.add_field(name=p2['name'], value=f"**Pos:** {p2['position']}", inline=True)
+    await ctx.send(embed=embed)
+
+@bot.command(name='contratar', aliases=['comprar'])
+async def contract_player(ctx, *, query: str):
+    search_query = normalize_str(query)
+    contracted = load_data(CONTRACTED_PLAYERS_FILE)
+    available_players = [p for p in ALL_PLAYERS if p["name"] not in contracted]
+    results = [p for p in available_players if search_query in normalize_str(p['name']) or search_query.upper() == p['position']]
+    if not results: return await ctx.send(f"😥 Nenhum jogador disponível encontrado para a busca: `{query}`")
+    results.sort(key=lambda p: p['value'], reverse=True)
+    view = ContractView(ctx, results)
+    embed = await view.create_embed(); view.message = await ctx.send(embed=embed, view=view)
+
+@bot.command(name='obter')
+@commands.cooldown(1, 300, commands.BucketType.user)
+async def get_player(ctx):
+    async with data_lock:
+        contracted = load_data(CONTRACTED_PLAYERS_FILE)
+        available = [p for p in ALL_PLAYERS if p["name"] not in contracted]
+        if not available: return await ctx.send("🤯 **Mercado Vazio!**")
+        player = random.choice(available); contracted.append(player["name"]); save_data(CONTRACTED_PLAYERS_FILE, contracted)
+    sale_price = int(player['value'] * SALE_PERCENTAGE)
+    embed = discord.Embed(title="🃏 Você tirou uma carta!", color=discord.Color.blue())
+    embed.set_image(url=player["image"])
+    embed.add_field(name=player['name'], value=f"**Overall:** {player['overall']} | **Posição:** {player['position']}")
+    embed.add_field(name="Valor de Venda Rápida", value=f"R$ {sale_price:,}")
+    view = KeepOrSellView(ctx.author, player); message = await ctx.send(embed=embed, view=view); view.message = message
+
+@get_player.error
+async def get_player_error(ctx, error):
+    if isinstance(error, commands.CommandOnCooldown): await ctx.send(f"⏳ **Acalme-se!** Tente novamente em **{int(error.retry_after)} segundos**.")
+
+@bot.command(name='saldo')
+async def balance(ctx):
+    user_data = await get_user_data(ctx.author.id); money = user_data[str(ctx.author.id)]['money']
+    await ctx.send(f"💰 {ctx.author.mention}, seu saldo é de **R$ {money:,}**.")
+
+async def perform_escalar(ctx, player, **kwargs):
+    async with data_lock:
+        all_data = await get_user_data(ctx.author.id); user_id = str(ctx.author.id)
+        team = all_data[user_id]['team']
+        if any(p and p['name'] == player['name'] for p in team): return await ctx.send(f"**{player['name']}** já está escalado.")
+        
+        # Lida com múltiplas posições como "ZAG/LE"
+        positions = player['position'].split('/')
+        
+        empty_slot = -1
+        chosen_pos = ""
+
+        # Procura um slot vago para qualquer uma das posições do jogador
+        for pos in positions:
+            if pos in SLOT_MAPPING:
+                valid_slots = SLOT_MAPPING[pos]
+                slot_found = next((i for i in valid_slots if team[i] is None), -1)
+                if slot_found != -1:
+                    empty_slot = slot_found
+                    chosen_pos = pos
+                    break
+        
+        if empty_slot != -1:
+            team[empty_slot] = player
+            save_data(USER_DATA_FILE, all_data)
+            await ctx.send(f"✅ **{player['name']}** foi escalado como **{chosen_pos}**!")
+        else:
+            await ctx.send(f"🚫 **Posição Cheia!** Vagas de **{player['position']}** ocupadas.")
+
+@bot.command(name='escalar')
+async def set_player(ctx, *, query: str):
+    search_query = normalize_str(query)
+    user_data = await get_user_data(ctx.author.id)
+    squad = user_data[str(ctx.author.id)]['squad']
+    results = [p for p in squad if search_query in normalize_str(p['name'])]
+    if not results: return await ctx.send(f"Nenhum jogador encontrado no seu elenco com o nome: `{query}`")
+    if len(results) == 1: await perform_escalar(ctx, results[0])
+    else:
+        view = ActionView(ctx, results, perform_escalar, "Escalar")
+        embed = await view.create_embed(); view.message = await ctx.send(embed=embed, view=view)
+
+async def perform_banco(ctx, player, **kwargs):
+    async with data_lock:
+        all_data = await get_user_data(ctx.author.id); user_id = str(ctx.author.id)
+        team = all_data[user_id]['team']
+        idx = next((i for i, p in enumerate(team) if p and p['name'] == player['name']), -1)
+        if idx == -1: return
+        player_name_unset = team[idx]['name']; team[idx] = None; save_data(USER_DATA_FILE, all_data)
+        await ctx.send(f"❌ **{player_name_unset}** foi para o banco de reservas.")
+
+@bot.command(name='banco')
+async def unset_player(ctx, *, query: str):
+    search_query = normalize_str(query)
+    user_data = await get_user_data(ctx.author.id)
+    team = user_data[str(ctx.author.id)]['team']
+    results = [p for p in team if p and search_query in normalize_str(p['name'])]
+    if not results: return await ctx.send(f"Nenhum jogador encontrado no seu time titular com o nome: `{query}`")
+    if len(results) == 1: await perform_banco(ctx, results[0])
+    else:
+        view = ActionView(ctx, results, perform_banco, "Mandar para o Banco")
+        embed = await view.create_embed(); view.message = await ctx.send(embed=embed, view=view)
+
+async def perform_vender(ctx, player, **kwargs):
+    async with data_lock:
+        user_data = await get_user_data(ctx.author.id); user_id = str(ctx.author.id)
+        team = user_data[user_id]['team']
+        for i, p_team in enumerate(team):
+            if p_team and p_team['name'] == player['name']: team[i] = None; break
+        sale_price = int(player['value'] * SALE_PERCENTAGE)
+        user_data[user_id]['money'] += sale_price
+        user_data[user_id]['squad'] = [p for p in user_data[user_id]['squad'] if p['name'] != player['name']]
+        contracted = load_data(CONTRACTED_PLAYERS_FILE); contracted = [p_name for p_name in contracted if p_name != player['name']]
+        save_data(USER_DATA_FILE, user_data); save_data(CONTRACTED_PLAYERS_FILE, contracted)
+    await ctx.send(f"💰 Você vendeu **{player['name']}** por **R$ {sale_price:,}**!")
+
+@bot.command(name='vender')
+async def sell_player(ctx, *, query: str):
+    search_query = normalize_str(query)
+    user_data = await get_user_data(ctx.author.id)
+    squad = user_data[str(ctx.author.id)]['squad']
+    results = [p for p in squad if search_query in normalize_str(p['name'])]
+    if not results: return await ctx.send(f"Nenhum jogador encontrado no seu elenco com o nome: `{query}`")
+    if len(results) == 1: await perform_vender(ctx, results[0])
+    else:
+        view = ActionView(ctx, results, perform_vender, "Vender")
+        embed = await view.create_embed(); view.message = await ctx.send(embed=embed, view=view)
+
+@bot.command(name='elenco')
+async def squad(ctx):
+    user_data = await get_user_data(ctx.author.id); squad_players = user_data[str(ctx.author.id)]["squad"]
+    if not squad_players: return await ctx.send(f"텅 **Elenco Vazio!**")
+    embed = discord.Embed(title=f"🎽 Elenco de {ctx.author.display_name} 🎽", color=ctx.author.color)
+    embed.description = "\n".join([f"**{p['name']}** | `{p['position']}` | Overall: **{p['overall']}**" for p in sorted(squad_players, key=lambda p: p['name'])])
+    await ctx.send(embed=embed)
+
+@bot.command(name='limpartime')
+async def clear_team(ctx):
+    async with data_lock:
+        all_data = await get_user_data(ctx.author.id)
+        all_data[str(ctx.author.id)]['team'] = [None] * 11; save_data(USER_DATA_FILE, all_data)
+    await ctx.send("🗑️ **Time Limpo!**")
+
+@bot.command(name='meutime')
+async def my_team(ctx):
+    user_data = await get_user_data(ctx.author.id); team = user_data[str(ctx.author.id)]["team"]
+    if not any(team): return await ctx.send(f"Você não escalou ninguém!")
+    msg = await ctx.send("⚙️ Montando a imagem do time..."); image_file = await generate_team_image(team, ctx.author.display_name)
+    await ctx.send(file=discord.File(image_file, 'meutime.png')); await msg.delete()
 
 @bot.command(name='ranking')
 async def ranking(ctx):
     user_data = load_data(USER_DATA_FILE)
     if not user_data: return await ctx.send("Ainda não há dados.")
     
-    # Filtra usuários que têm a chave 'wins' e o valor é maior que 0
     sorted_users = sorted(
         [(uid, data.get('wins', 0)) for uid, data in user_data.items() if data.get('wins', 0) > 0],
         key=lambda i: i[1],
@@ -475,6 +666,218 @@ async def ranking(ctx):
     embed.description = "\n".join(desc)
     await ctx.send(embed=embed)
 
+@bot.command(name='resetar')
+async def reset_account(ctx):
+    embed = discord.Embed(title="⚠️ ATENÇÃO: Resetar Conta ⚠️", description=f"Tem certeza, {ctx.author.mention}?\n\nIsso apagará tudo. **Não pode ser desfeito.**\n\nDigite `sim` para confirmar.", color=discord.Color.red())
+    await ctx.send(embed=embed)
+    def check(m): return m.author == ctx.author and m.channel == ctx.channel and m.content.lower() == 'sim'
+    try: await bot.wait_for('message', timeout=30.0, check=check)
+    except asyncio.TimeoutError: return await ctx.send("Reset cancelado.")
+    async with data_lock:
+        user_data = load_data(USER_DATA_FILE); contracted_players = load_data(CONTRACTED_PLAYERS_FILE)
+        user_id = str(ctx.author.id)
+        if user_id in user_data:
+            players_to_release = {p['name'] for p in user_data[user_id].get("squad", [])}
+            contracted_players = [name for name in contracted_players if name not in players_to_release]
+            del user_data[user_id]
+            save_data(USER_DATA_FILE, user_data); save_data(CONTRACTED_PLAYERS_FILE, contracted_players)
+            await ctx.send("✅ **Conta resetada!**")
+        else: await ctx.send("Você não possui dados para resetar.")
+
+@bot.command(name='tigrinho')
+async def tigrinho_game(ctx, bet: int):
+    user_id = str(ctx.author.id)
+    async with data_lock:
+        user_data = await get_user_data(user_id)
+        user_money = user_data[user_id]['money']
+        if bet <= 0: return await ctx.send("A aposta deve ser um valor positivo, né?")
+        if user_money < bet: return await ctx.send(f"💸 Você não tem dinheiro suficiente! Seu saldo é de R$ {user_money:,}.")
+        user_data[user_id]['money'] -= bet
+        save_data(USER_DATA_FILE, user_data)
+    emojis = ["🍒", "🍋", "🍊", "🍉", "⭐", "💎", "🐯"]
+    msg = await ctx.send(f"Você apostou R$ {bet:,}. Girando o tigrinho...\n\n| 🎰 | 🎰 | 🎰 |")
+    await asyncio.sleep(1); await msg.edit(content=f"Você apostou R$ {bet:,}. Girando o tigrinho...\n\n| {random.choice(emojis)} | 🎰 | 🎰 |")
+    await asyncio.sleep(1); await msg.edit(content=f"Você apostou R$ {bet:,}. Girando o tigrinho...\n\n| {random.choice(emojis)} | {random.choice(emojis)} | 🎰 |")
+    await asyncio.sleep(1)
+    reels = [random.choice(emojis) for _ in range(3)]; result_text = f"| {reels[0]} | {reels[1]} | {reels[2]} |"
+    winnings = 0; multiplier = 0; result_title = "PERDEU!"; color = discord.Color.red()
+    if reels.count("🐯") == 3: multiplier = 50; result_title = "JACKPOT DO TIGRINHO!!! 🐯🐯🐯"
+    elif reels.count(reels[0]) == 3: multiplier = 10 if reels[0] != "🍒" else 5; result_title = "GRANDE PRÊMIO!"
+    elif reels.count("🐯") == 2: multiplier = 5; result_title = "QUASE O JACKPOT!"
+    elif reels.count(reels[0]) == 2 or reels.count(reels[1]) == 2: multiplier = 2; result_title = "PRÊMIO PEQUENO!"
+    elif reels.count("🐯") == 1: multiplier = 1.5; result_title = "O TIGRINHO AJUDOU!"
+    if multiplier > 0:
+        winnings = int(bet * multiplier); color = discord.Color.green()
+        async with data_lock:
+            user_data = await get_user_data(user_id)
+            user_data[user_id]['money'] += winnings; save_data(USER_DATA_FILE, user_data)
+    embed = discord.Embed(title=result_title, color=color)
+    embed.add_field(name="Resultado", value=result_text, inline=False)
+    if winnings > 0: embed.add_field(name="Prêmio", value=f"Você ganhou **R$ {winnings:,}**!", inline=False)
+    else: embed.add_field(name="Prêmio", value="Mais sorte na próxima vez!", inline=False)
+    final_balance = user_data[user_id]['money']; embed.set_footer(text=f"Seu novo saldo é de R$ {final_balance:,}")
+    await msg.edit(content="", embed=embed)
+
+# --- NOVO COMANDO ROCKET ---
+class RocketView(discord.ui.View):
+    def __init__(self, author):
+        super().__init__(timeout=90.0)
+        self.author = author
+        self.decision = None
+
+    @discord.ui.button(label="Retirar!", style=discord.ButtonStyle.green, emoji="💸")
+    async def cash_out(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user != self.author:
+            await interaction.response.send_message("Não é a sua aposta!", ephemeral=True)
+            return
+        self.decision = "cashed_out"
+        button.disabled = True
+        await interaction.response.edit_message(view=self)
+        self.stop()
+
+@bot.command(name='rocket')
+async def rocket_game(ctx, bet: int):
+    user_id = str(ctx.author.id)
+    async with data_lock:
+        user_data = await get_user_data(user_id)
+        user_money = user_data[user_id]['money']
+        if bet <= 0:
+            return await ctx.send("A aposta deve ser um valor positivo.")
+        if user_money < bet:
+            return await ctx.send(f"💸 Você não tem dinheiro suficiente! Seu saldo é de R$ {user_money:,}.")
+        user_data[user_id]['money'] -= bet
+        save_data(USER_DATA_FILE, user_data)
+
+    view = RocketView(ctx.author)
+    embed = discord.Embed(title="🚀 Jogo do Foguete 🚀", color=discord.Color.purple())
+    embed.description = f"Apostou: **R$ {bet:,}**\nMultiplicador atual: **1.00x**"
+    embed.set_footer(text="Clique em 'Retirar!' antes que exploda!")
+    message = await ctx.send(embed=embed, view=view)
+
+    multiplier = 1.0
+    crash_point = random.uniform(1.1, 15.0) # O foguete vai explodir entre 1.1x e 15.0x
+
+    while multiplier < crash_point:
+        await asyncio.sleep(1.5)
+        # Aumenta o multiplicador mais rápido conforme o tempo passa
+        increment = 0.10 + (multiplier * 0.05)
+        multiplier += increment
+
+        embed.description = f"Apostou: **R$ {bet:,}**\nMultiplicador atual: **{multiplier:.2f}x**"
+        await message.edit(embed=embed)
+        
+        # Checa se o usuário clicou no botão
+        if view.decision == "cashed_out":
+            winnings = int(bet * multiplier)
+            async with data_lock:
+                user_data = await get_user_data(user_id)
+                user_data[user_id]['money'] += winnings
+                save_data(USER_DATA_FILE, user_data)
+            
+            embed.title = "🎉 Você Ganhou! 🎉"
+            embed.description = f"Você retirou em **{multiplier:.2f}x** e ganhou **R$ {winnings:,}**!"
+            embed.color = discord.Color.green()
+            await message.edit(embed=embed, view=None)
+            return
+
+    # Se o loop terminar, o foguete explodiu
+    embed.title = "💥 EXPLODIU! 💥"
+    embed.description = f"O foguete explodiu em **{multiplier:.2f}x**. Você perdeu sua aposta de **R$ {bet:,}**."
+    embed.color = discord.Color.red()
+    await message.edit(embed=embed, view=None)
+
+
+@bot.command(name='confrontar')
+async def confront(ctx, opponent: discord.Member):
+    author = ctx.author
+    if author == opponent: return await ctx.send("😑 Você não pode se desafiar.")
+    if opponent.bot: return await ctx.send("🤖 Você não pode desafiar um bot.")
+    async with data_lock:
+        all_data = load_data(USER_DATA_FILE)
+        author_id, opp_id = str(author.id), str(opponent.id)
+        if not (author_id in all_data and opp_id in all_data): return await ctx.send("Um dos jogadores não tem dados.")
+        author_team = all_data[author_id].get("team", []); opp_team = all_data[opp_id].get("team", [])
+        if None in author_team or None in opp_team: return await ctx.send("⚠️ **Times Incompletos!** Ambos precisam ter 11 jogadores escalados.")
+    def get_team_sector(team, positions): return [p for p in team if p and p['position'] in positions]
+    teams = {
+        author.id: {"user": author, "players": author_team, "attack": get_team_sector(author_team, ['PE', 'PD', 'CA', 'MEI']), "mid": get_team_sector(author_team, ['MC', 'VOL']), "def": get_team_sector(author_team, ['ZAG', 'LE', 'LD']), "keeper": get_team_sector(author_team, ['GOL'])[0]},
+        opponent.id: {"user": opponent, "players": opp_team, "attack": get_team_sector(opp_team, ['PE', 'PD', 'CA', 'MEI']), "mid": get_team_sector(opp_team, ['MC', 'VOL']), "def": get_team_sector(opp_team, ['ZAG', 'LE', 'LD']), "keeper": get_team_sector(opp_team, ['GOL'])[0]}
+    }
+    score = {author.id: 0, opponent.id: 0}; goalscorers = {author.id: [], opponent.id: []}; match_log = ["🎙️ **Narrador:** Começa o jogo! Uma grande partida nos espera!"]
+    embed = discord.Embed(title=f"🔵 {author.display_name} vs {opponent.display_name} 🔴", color=discord.Color.greyple())
+    embed.add_field(name="Placar", value=f"0 - 0", inline=False).add_field(name="Ao Vivo 🔴", value="```\n" + "\n".join(match_log) + "\n```", inline=False)
+    match_message = await ctx.send(embed=embed)
+    ball_holder = None; possession_team_id = random.choice([author.id, opponent.id])
+    for minute in range(1, 92):
+        await asyncio.sleep(1.5)
+        mid_battle = sum(p['overall'] for p in teams[author.id]["mid"]) - sum(p['overall'] for p in teams[opponent.id]["mid"])
+        if random.random() < (0.5 + mid_battle / 250): possession_team_id = author.id
+        else: possession_team_id = opponent.id
+        attacker_id = possession_team_id; defender_id = opponent.id if possession_team_id == author.id else author.id
+        event_chance = (sum(p['overall'] for p in teams[attacker_id]["attack"]) / len(teams[attacker_id]["attack"])) / 250.0
+        if random.random() > event_chance:
+            if not ball_holder: ball_holder = random.choice(teams[attacker_id]["mid"])
+            new_ball_holder = random.choice(teams[attacker_id]["players"])
+            log_entry = f"{minute}' - **{teams[attacker_id]['user'].display_name}** com a posse. **{ball_holder['name']}** toca para **{new_ball_holder['name']}**."
+            ball_holder = new_ball_holder
+        else:
+            playmaker = random.choice(teams[attacker_id]["mid"]); attacker = random.choice(teams[attacker_id]["attack"]); defender = random.choice(teams[defender_id]["def"]); keeper = teams[defender_id]["keeper"]
+            log_entry = f"⚡ {minute}' - **{playmaker['name']}** inicia o ataque! Ele lança para **{attacker['name']}**..."
+            match_log.append(log_entry); embed.set_field_at(1, name="Ao Vivo 🔴", value="```\n" + "\n".join(match_log[-5:]) + "\n```"); await match_message.edit(embed=embed)
+            await asyncio.sleep(2)
+            dribble_success = (attacker['overall'] - defender['overall']) > random.randint(-25, 25)
+            if not dribble_success:
+                log_entry = f"🧱 **{defender['name']}** chega junto e corta a jogada! Que categoria do zagueirão."
+            else:
+                log_entry = f"🏃‍♂️ **{attacker['name']}** passa por **{defender['name']}** e fica de frente pro gol! VAI CHUTAR..."
+                match_log.append(log_entry); embed.set_field_at(1, name="Ao Vivo 🔴", value="```\n" + "\n".join(match_log[-5:]) + "\n```"); await match_message.edit(embed=embed)
+                await asyncio.sleep(2.5)
+                shot_power = attacker['overall'] + random.randint(-10, 10); save_power = keeper['overall'] + random.randint(-15, 15)
+                outcome = random.choices(['goal', 'save', 'post', 'miss', 'penalty'], weights=[35, 30, 10, 15, 10], k=1)[0]
+                if shot_power < save_power and outcome == 'goal': outcome = 'save'
+                if outcome == 'goal':
+                    if random.random() < 0.15:
+                        await asyncio.sleep(2); log_entry = f"⚠️ {minute}' - O VAR está checando um possível impedimento..."
+                        embed.set_field_at(1, name="Ao Vivo 🔴", value="```\n" + "\n".join(match_log + [log_entry]) + "\n```"); await match_message.edit(embed=embed)
+                        await asyncio.sleep(4)
+                        if random.random() < 0.3: log_entry = f"❌ {minute}' - GOL ANULADO! O VAR pegou impedimento de {attacker['name']}!"
+                        else: score[attacker_id] += 1; goalscorers[attacker_id].append(f"{attacker['name']} ({playmaker['name']}) {minute}'"); log_entry = f"✅ {minute}' - GOL CONFIRMADO! É bola na rede!"
+                    else:
+                        score[attacker_id] += 1; goalscorers[attacker_id].append(f"{attacker['name']} ({playmaker['name']}) {minute}'")
+                        prompt = f"Você é um narrador de futebol brasileiro, como Cleber Machado ou Galvão Bueno. Narre um gol de forma empolgante. Marcador do Gol: {attacker['name']}. Jogador que deu a assistência: {playmaker['name']}. Seja criativo e use gírias de futebol."
+                        log_entry = await generate_ai_narration(prompt, f"⚽ GOOOOL! {attacker['name']} marca!")
+                elif outcome == 'save':
+                    prompt = f"Você é um narrador de futebol brasileiro. Narre uma defesa muito difícil e espetacular. Goleiro: {keeper['name']}. Atacante que chutou: {attacker['name']}. Seja criativo."
+                    log_entry = await generate_ai_narration(prompt, f"🧤 QUE DEFESA! {keeper['name']} faz um milagre!")
+                elif outcome == 'post': log_entry = f"💥 NO POSTE! {attacker['name']} carimba a trave! Quase o gol!"
+                elif outcome == 'penalty':
+                    log_entry = f"🚨 PÊNALTI! {defender['name']} derruba {attacker['name']} na área!"; await asyncio.sleep(2)
+                    penalty_shot = attacker['overall'] + random.randint(-5, 5); penalty_save = keeper['overall'] + random.randint(-15, 15)
+                    if penalty_shot > penalty_save:
+                        score[attacker_id] += 1; goalscorers[attacker_id].append(f"{attacker['name']} (P) {minute}'"); log_entry += f"\n⚽ GOOOOL DE PÊNALTI! {attacker['name']} cobra com perfeição!"
+                    else: log_entry += f"\n🧤 DEFENDEU {keeper['name'].upper()}! O goleiro pega o pênalti!"
+                else: log_entry = f"🤦‍♂️ PRA FORA! Que chance perdida por **{attacker['name']}**! Ele isolou a bola!"
+        match_log.append(log_entry)
+        embed.set_field_at(0, name="Placar", value=f"🔵 {score[author.id]} - {score[opponent.id]} 🔴")
+        embed.set_field_at(1, name="Ao Vivo 🔴", value="```\n" + "\n".join(match_log[-5:]) + "\n```")
+        if minute == 45: match_log.append("\n⏸️ **FIM DO PRIMEIRO TEMPO!**\n")
+        await match_message.edit(embed=embed)
+    await asyncio.sleep(3)
+    winner = None
+    if score[author.id] > score[opponent.id]: winner = author
+    elif score[opponent.id] > score[author.id]: winner = opponent
+    final_embed = discord.Embed(title="🏁 FIM DE JOGO 🏁", color=discord.Color.gold())
+    final_embed.add_field(name="Resultado Final", value=f"**{author.display_name} {score[author.id]} x {score[opponent.id]} {opponent.display_name}**", inline=False)
+    if winner:
+        final_embed.description = f"🏆 O grande vencedor é **{winner.mention}**! 🏆"
+        async with data_lock:
+            winner_data = await get_user_data(winner.id)
+            winner_data[str(winner.id)]["wins"] += 1; save_data(USER_DATA_FILE, winner_data)
+    else: final_embed.description = "🤝 A partida terminou em empate! 🤝"
+    author_scorers = ", ".join(goalscorers[author.id]) or "Ninguém"; opp_scorers = ", ".join(goalscorers[opponent.id]) or "Ninguém"
+    final_embed.add_field(name=f"Gols de {author.display_name}", value=author_scorers, inline=True)
+    final_embed.add_field(name=f"Gols de {opponent.display_name}", value=opp_scorers, inline=True)
+    await match_message.edit(embed=final_embed)
 
 # --- NOVOS COMANDOS ÚTEIS ---
 
@@ -485,18 +888,16 @@ async def ranking_overall(ctx):
     if not user_data:
         return await ctx.send("Ainda não há dados para gerar um ranking.")
 
-    # Calcula o overall de cada usuário que tem um time
     user_overalls = []
     for uid, data in user_data.items():
         team = data.get('team', [None] * 11)
-        if any(p for p in team): # Apenas considera times com pelo menos 1 jogador
+        if any(p for p in team): 
             overall = sum(p['overall'] for p in team if p)
             user_overalls.append((uid, overall))
     
     if not user_overalls:
         return await ctx.send("⭐ **Ranking de Overall Vazio!** Ninguém montou um time ainda.")
 
-    # Ordena os usuários pelo overall
     sorted_users = sorted(user_overalls, key=lambda i: i[1], reverse=True)
 
     embed = discord.Embed(title="⭐ Ranking de Overall do Time - Top 10 ⭐", color=discord.Color.gold())
@@ -524,7 +925,6 @@ async def market(ctx, pos: str = None, sort_by: str = 'valor'):
     if not available_players:
         return await ctx.send("🤯 **Mercado Vazio!** Todos os jogadores foram contratados.")
 
-    # Filtra por posição, se especificado
     if pos:
         results = [p for p in available_players if pos.upper() in p['position'].split('/')]
         if not results:
@@ -532,7 +932,6 @@ async def market(ctx, pos: str = None, sort_by: str = 'valor'):
     else:
         results = available_players
 
-    # Ordena os resultados
     valid_sorts = ['valor', 'overall', 'nome']
     sort_by = sort_by.lower()
     if sort_by not in valid_sorts:
@@ -542,7 +941,6 @@ async def market(ctx, pos: str = None, sort_by: str = 'valor'):
     sort_key = 'value' if sort_by == 'valor' else sort_by
     results.sort(key=lambda p: p[sort_key], reverse=reverse_sort)
 
-    # Cria embeds paginados
     pages = []
     chunk_size = 10
     for i in range(0, len(results), chunk_size):
@@ -567,10 +965,7 @@ async def market(ctx, pos: str = None, sort_by: str = 'valor'):
     view = PaginatedEmbedView(ctx, pages)
     await view.start()
 
-# --- LÓGICA DE TROCA ---
-
 async def send_trade_request(ctx, requested_player, **kwargs):
-    """Função chamada após o proposer escolher o jogador do alvo."""
     proposer = ctx.author
     offered_player = kwargs.get('offered_player')
     target_user = kwargs.get('target_user')
@@ -590,9 +985,8 @@ async def send_trade_request(ctx, requested_player, **kwargs):
 
 
 async def proposer_selected_player(ctx, offered_player, **kwargs):
-    """Função chamada após o proposer escolher o próprio jogador."""
     target_user = kwargs.get('target_user')
-    await ctx.message.delete() # Limpa a mensagem anterior
+    await ctx.message.delete()
 
     target_data = await get_user_data(target_user.id)
     target_squad = target_data[str(target_user.id)].get('squad', [])
@@ -602,7 +996,6 @@ async def proposer_selected_player(ctx, offered_player, **kwargs):
 
     msg = await ctx.send(f"Agora, selecione o jogador que você quer de **{target_user.display_name}**:")
     
-    # Prepara os kwargs para o próximo passo
     next_kwargs = {'offered_player': offered_player, 'target_user': target_user}
     
     view = ActionView(ctx, target_squad, send_trade_request, "Pedir em Troca", **next_kwargs)
@@ -613,7 +1006,6 @@ async def proposer_selected_player(ctx, offered_player, **kwargs):
 
 @bot.command(name='trocar')
 async def trade(ctx, target_user: discord.Member):
-    """Inicia uma troca de jogadores com outro usuário."""
     proposer = ctx.author
     if proposer == target_user:
         return await ctx.send("Você não pode trocar jogadores consigo mesmo.")
@@ -628,33 +1020,92 @@ async def trade(ctx, target_user: discord.Member):
     
     msg = await ctx.send("Primeiro, selecione o jogador do seu elenco que você quer oferecer na troca:")
     
-    # Inicia o primeiro passo, passando o target_user como kwarg
     view = ActionView(ctx, proposer_squad, proposer_selected_player, "Oferecer", target_user=target_user)
     embed = await view.create_embed()
     view.message = await ctx.send(embed=embed, view=view)
     await msg.delete()
 
-# --- RESTANTE DO CÓDIGO (mantido como estava) ---
+# --- COMANDOS DE ADMINISTRADOR ---
+@bot.command(name='money')
+@commands.has_permissions(administrator=True)
+async def give_money(ctx, user: discord.Member, amount: int):
+    if user.bot: return await ctx.send("Você não pode dar dinheiro para um bot.")
+    if amount == 0: return await ctx.send("A quantia não pode ser zero.")
+    async with data_lock:
+        all_data = await get_user_data(user.id)
+        user_id = str(user.id); all_data[user_id]['money'] += amount; save_data(USER_DATA_FILE, all_data)
+    verb = "adicionados" if amount > 0 else "removidos"; new_balance = all_data[str(user.id)]['money']
+    await ctx.send(f"✅ Sucesso! **R$ {abs(amount):,}** foram {verb} para a conta de {user.mention}.\nSaldo atual: R$ {new_balance:,}.")
 
-@bot.command(name='meutime')
-async def my_team(ctx):
-    user_data = await get_user_data(ctx.author.id); team = user_data[str(ctx.author.id)]["team"]
-    if not any(team): return await ctx.send(f"Você não escalou ninguém!")
-    msg = await ctx.send("⚙️ Montando a imagem do time..."); image_file = await generate_team_image(team, ctx.author.display_name)
-    await ctx.send(file=discord.File(image_file, 'meutime.png')); await msg.delete()
+@give_money.error
+async def give_money_error(ctx, error):
+    if isinstance(error, commands.MissingPermissions): await ctx.send("🚫 Você não tem permissão para usar este comando.")
+    elif isinstance(error, commands.BadArgument): await ctx.send(f"Uso incorreto. Formato: `{BOT_PREFIX}money @usuario <quantia>`")
+    elif isinstance(error, commands.MissingRequiredArgument): await ctx.send(f"Faltam argumentos. Formato: `{BOT_PREFIX}money @usuario <quantia>`")
 
-# ... (todos os outros comandos de `noticias` a `best_team_error` permanecem aqui)
-# Para evitar uma resposta excessivamente longa, eles não foram colados novamente, 
-# mas devem estar presentes no seu arquivo final.
+@bot.command(name='fullreset')
+@commands.has_permissions(administrator=True)
+async def full_reset(ctx):
+    embed = discord.Embed(title="🚨 ALERTA MÁXIMO - RESET TOTAL 🚨", description="**Esta ação é irreversível e apagará TUDO.**\nPara confirmar, digite `EU TENHO CERTEZA E QUERO RESETAR O BOT`.", color=discord.Color.from_rgb(255, 0, 0))
+    await ctx.send(embed=embed)
+    def check(m): return m.author == ctx.author and m.channel == ctx.channel and m.content == "EU TENHO CERTEZA E QUERO RESETAR O BOT"
+    try: await bot.wait_for('message', timeout=60.0, check=check)
+    except asyncio.TimeoutError: return await ctx.send("Tempo esgotado. O reset total foi cancelado.")
+    msg = await ctx.send("💥 **Confirmado.** Iniciando reset total...")
+    async with data_lock:
+        files_deleted = []
+        try:
+            if os.path.exists(USER_DATA_FILE): os.remove(USER_DATA_FILE); files_deleted.append(USER_DATA_FILE)
+            if os.path.exists(CONTRACTED_PLAYERS_FILE): os.remove(CONTRACTED_PLAYERS_FILE); files_deleted.append(CONTRACTED_PLAYERS_FILE)
+        except Exception as e: return await msg.edit(content=f"❌ Erro ao apagar arquivos: {e}")
+    await msg.edit(content=f"🗑️ Arquivos `{', '.join(files_deleted)}` foram apagados.\n\n✅ **RESET TOTAL CONCLUÍDO.**\nÉ altamente recomendável que você **reinicie o bot agora**.")
+
+@full_reset.error
+async def full_reset_error(ctx, error):
+    if isinstance(error, commands.MissingPermissions): await ctx.send("🚫 Você não tem permissão para usar este comando.")
+
+@bot.command(name='bestteam')
+@commands.has_permissions(administrator=True)
+async def best_team(ctx, user: discord.Member):
+    if user.bot: return await ctx.send("Bots não podem ter times.")
+    await ctx.send(f"🤖 Montando o time dos sonhos para {user.mention}... Isso pode levar um momento.")
+    async with data_lock:
+        all_user_data = load_data(USER_DATA_FILE)
+        contracted_players = load_data(CONTRACTED_PLAYERS_FILE)
+        target_user_id = str(user.id)
+        if target_user_id not in all_user_data:
+            all_user_data[target_user_id] = {"squad": [], "team": [None] * 11, "wins": 0, "money": INITIAL_MONEY}
+        current_squad_names = {p['name'] for p in all_user_data[target_user_id].get("squad", [])}
+        contracted_players = [p_name for p_name in contracted_players if p_name not in current_squad_names]
+        all_user_data[target_user_id]['squad'] = []
+        all_user_data[target_user_id]['team'] = [None] * 11
+        new_team = [None] * 11
+        formation_slots = {
+            0: "GOL", 1: "ZAG", 2: "ZAG", 3: "LE", 4: "LD", 5: "VOL", 
+            6: "MC", 7: "MEI", 8: "PE", 9: "PD", 10: "CA"
+        }
+        used_player_names_for_team = set()
+        for slot_index, position in formation_slots.items():
+            candidates = [p for p in ALL_PLAYERS if p['position'] == position and p['name'] not in contracted_players and p['name'] not in used_player_names_for_team]
+            candidates.sort(key=lambda p: p['overall'], reverse=True)
+            if candidates:
+                best_player = candidates[0]
+                new_team[slot_index] = best_player
+                contracted_players.append(best_player['name'])
+                used_player_names_for_team.add(best_player['name'])
+        all_user_data[target_user_id]['team'] = new_team
+        all_user_data[target_user_id]['squad'] = [p for p in new_team if p]
+        save_data(USER_DATA_FILE, all_user_data)
+        save_data(CONTRACTED_PLAYERS_FILE, contracted_players)
+    await ctx.send(f"✅ Time dos sonhos montado para {user.mention}! Use `{BOT_PREFIX}meutime` para ver o resultado.")
+
+@best_team.error
+async def best_team_error(ctx, error):
+    if isinstance(error, commands.MissingPermissions): await ctx.send("🚫 Você não tem permissão para usar este comando.")
+    elif isinstance(error, commands.MissingRequiredArgument): await ctx.send(f"Uso incorreto. Formato: `{BOT_PREFIX}bestteam @usuario`")
 
 # --- EXECUÇÃO DO BOT ---
 if __name__ == "__main__":
-    # Carregue o resto dos seus comandos aqui.
-    # Exemplo de como o código se parece:
-    # @bot.command(name='noticias') ...
-    # @bot.command(name='info') ...
-    # etc.
-    
     TOKEN = os.environ.get('DISCORD_TOKEN')
     keep_alive() 
     if TOKEN:
