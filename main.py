@@ -89,28 +89,22 @@ async def generate_ai_narration(prompt_text, fallback_text):
         print(f"Erro na API Gemini: {e}")
         return fallback_text
 
+# --- FUNÇÃO MEUTIME ATUALIZADA ---
 async def generate_team_image(team_players, user_name):
-    """Gera a imagem do time com fotos retangulares e visual moderno."""
-    width, height = 700, 900
-    dark_green_top = (8, 43, 27)
-    dark_green_bottom = (4, 24, 15)
-    
-    field_img = Image.new("RGB", (width, height))
-    draw = ImageDraw.Draw(field_img)
-
-    for y in range(height):
-        ratio = y / height
-        r = int(dark_green_top[0] * (1 - ratio) + dark_green_bottom[0] * ratio)
-        g = int(dark_green_top[1] * (1 - ratio) + dark_green_bottom[1] * ratio)
-        b = int(dark_green_top[2] * (1 - ratio) + dark_green_bottom[2] * ratio)
-        draw.line([(0, y), (width, y)], fill=(r, g, b))
-
+    """Gera a imagem do time com o novo fundo e visual moderno."""
     try:
-        field_lines_response = requests.get("https://i.imgur.com/83zT2A9.png")
-        field_lines_img = Image.open(BytesIO(field_lines_response.content)).convert("RGBA")
-        field_img.paste(field_lines_img, (0,0), field_lines_img)
-    except Exception:
-        print("Aviso: Não foi possível carregar as linhas do campo.")
+        # Carrega a imagem de fundo a partir da URL fornecida
+        background_url = "https://i.ibb.co/wh0Fdcjx/mermao.png"
+        background_response = requests.get(background_url)
+        background_response.raise_for_status()
+        field_img = Image.open(BytesIO(background_response.content)).convert("RGBA")
+    except Exception as e:
+        print(f"Erro ao carregar imagem de fundo: {e}. Usando fallback.")
+        # Fallback para um fundo verde escuro caso a URL falhe
+        field_img = Image.new("RGB", (700, 900), color=(8, 43, 27))
+
+    draw = ImageDraw.Draw(field_img)
+    width, height = field_img.size
 
     try:
         title_font = ImageFont.truetype("arialbd.ttf", 42)
@@ -121,8 +115,8 @@ async def generate_team_image(team_players, user_name):
         title_font = player_name_font = player_stats_font = team_stats_font = ImageFont.load_default()
 
     title_text = f"Time de {user_name}"
-    draw.text((350, 38), title_text, font=title_font, fill=(0,0,0,120), anchor="mt", stroke_width=2)
-    draw.text((350, 35), title_text, font=title_font, fill="#FFFFFF", anchor="mt")
+    draw.text((width/2, 38), title_text, font=title_font, fill=(0,0,0,120), anchor="mt", stroke_width=2)
+    draw.text((width/2, 35), title_text, font=title_font, fill="#FFFFFF", anchor="mt")
 
     total_overall = 0; total_value = 0
     for i, player in enumerate(team_players):
@@ -167,15 +161,16 @@ async def generate_team_image(team_players, user_name):
 
     stats_overall_text = f"⭐ Overall Total: {total_overall}"
     stats_value_text = f"💰 Valor de Mercado: R$ {total_value:,}"
-    draw.text((35, 852), stats_overall_text, font=team_stats_font, fill="black", anchor="ls", stroke_width=2)
-    draw.text((35, 850), stats_overall_text, font=team_stats_font, fill="white", anchor="ls")
-    draw.text((35, 882), stats_value_text, font=team_stats_font, fill="black", anchor="ls", stroke_width=2)
-    draw.text((35, 880), stats_value_text, font=team_stats_font, fill="#39FF14", anchor="ls")
+    draw.text((35, height - 48), stats_overall_text, font=team_stats_font, fill="black", anchor="ls", stroke_width=2)
+    draw.text((35, height - 50), stats_overall_text, font=team_stats_font, fill="white", anchor="ls")
+    draw.text((35, height - 18), stats_value_text, font=team_stats_font, fill="black", anchor="ls", stroke_width=2)
+    draw.text((35, height - 20), stats_value_text, font=team_stats_font, fill="#39FF14", anchor="ls")
     
     img_byte_arr = BytesIO()
     field_img.save(img_byte_arr, format='PNG')
     img_byte_arr.seek(0)
     return img_byte_arr
+
 
 # --- VIEWS DE INTERAÇÃO ---
 class KeepOrSellView(discord.ui.View):
@@ -295,8 +290,7 @@ async def on_ready():
     print(f'🚀 {bot.user.name} V15 (IA e Persistência) está no ar!'); fetch_and_parse_players()
     await bot.change_presence(activity=discord.Game(name=f"Use {BOT_PREFIX}help"))
 
-# --- COMANDOS COMPLETOS ---
-
+# --- COMANDO HELP ATUALIZADO ---
 @bot.command(name='help')
 async def help_command(ctx):
     embed = discord.Embed(title="📜 Comandos do RafutBot 15.0 📜", color=discord.Color.gold())
@@ -314,8 +308,12 @@ async def help_command(ctx):
     embed.add_field(name=f"❌ `{BOT_PREFIX}banco <nome>`", value="Move um jogador para o banco (busca parcial).", inline=False)
     embed.add_field(name=f"🖼️ `{BOT_PREFIX}meutime`", value="Gera uma imagem tática do seu time.", inline=False)
     embed.add_field(name=f"⚔️ `{BOT_PREFIX}confrontar @usuario`", value="Inicia uma partida narrada por IA!", inline=False)
-    embed.add_field(name="**🎲 Cassino do Tigrinho 🎲**", value="-"*25, inline=False)
+    
+    # Seção de jogos atualizada
+    embed.add_field(name="**🎲 Jogos de Aposta 🎲**", value="-"*25, inline=False)
     embed.add_field(name=f"🐯 `{BOT_PREFIX}tigrinho <quantia>`", value="Aposte sua grana no jogo do tigrinho!", inline=False)
+    embed.add_field(name=f"🚀 `{BOT_PREFIX}rocket <quantia>`", value="Aposte e retire antes que o foguete exploda!", inline=False)
+
     if ctx.author.guild_permissions.administrator:
         embed.add_field(name="👑 Comandos de Administrador 👑", value="-" * 25, inline=False)
         embed.add_field(name=f"⭐ `{BOT_PREFIX}bestteam @usuario`", value="Monta o melhor time possível para um usuário.", inline=False)
@@ -323,6 +321,7 @@ async def help_command(ctx):
         embed.add_field(name=f"🚨 `{BOT_PREFIX}fullreset`", value="Apaga TODOS os dados salvos do bot.", inline=False)
     await ctx.send(embed=embed)
 
+# ... (restante dos comandos de noticias, info, comparar, etc. permanecem os mesmos) ...
 @bot.command(name='noticias')
 async def news(ctx):
     if not gemini_model: return await ctx.send("O serviço de notícias (IA) está indisponível no momento.")
@@ -580,6 +579,75 @@ async def tigrinho_game(ctx, bet: int):
     final_balance = user_data[user_id]['money']; embed.set_footer(text=f"Seu novo saldo é de R$ {final_balance:,}")
     await msg.edit(content="", embed=embed)
 
+# --- NOVO COMANDO ROCKET ---
+class RocketView(discord.ui.View):
+    def __init__(self, author):
+        super().__init__(timeout=90.0)
+        self.author = author
+        self.decision = None
+
+    @discord.ui.button(label="Retirar!", style=discord.ButtonStyle.green, emoji="💸")
+    async def cash_out(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user != self.author:
+            await interaction.response.send_message("Não é a sua aposta!", ephemeral=True)
+            return
+        self.decision = "cashed_out"
+        button.disabled = True
+        await interaction.response.edit_message(view=self)
+        self.stop()
+
+@bot.command(name='rocket')
+async def rocket_game(ctx, bet: int):
+    user_id = str(ctx.author.id)
+    async with data_lock:
+        user_data = await get_user_data(user_id)
+        user_money = user_data[user_id]['money']
+        if bet <= 0:
+            return await ctx.send("A aposta deve ser um valor positivo.")
+        if user_money < bet:
+            return await ctx.send(f"💸 Você não tem dinheiro suficiente! Seu saldo é de R$ {user_money:,}.")
+        user_data[user_id]['money'] -= bet
+        save_data(USER_DATA_FILE, user_data)
+
+    view = RocketView(ctx.author)
+    embed = discord.Embed(title="🚀 Jogo do Foguete 🚀", color=discord.Color.purple())
+    embed.description = f"Apostou: **R$ {bet:,}**\nMultiplicador atual: **1.00x**"
+    embed.set_footer(text="Clique em 'Retirar!' antes que exploda!")
+    message = await ctx.send(embed=embed, view=view)
+
+    multiplier = 1.0
+    crash_point = random.uniform(1.1, 15.0) # O foguete vai explodir entre 1.1x e 15.0x
+
+    while multiplier < crash_point:
+        await asyncio.sleep(1.5)
+        # Aumenta o multiplicador mais rápido conforme o tempo passa
+        increment = 0.10 + (multiplier * 0.05)
+        multiplier += increment
+
+        embed.description = f"Apostou: **R$ {bet:,}**\nMultiplicador atual: **{multiplier:.2f}x**"
+        await message.edit(embed=embed)
+        
+        # Checa se o usuário clicou no botão
+        if view.decision == "cashed_out":
+            winnings = int(bet * multiplier)
+            async with data_lock:
+                user_data = await get_user_data(user_id)
+                user_data[user_id]['money'] += winnings
+                save_data(USER_DATA_FILE, user_data)
+            
+            embed.title = "🎉 Você Ganhou! 🎉"
+            embed.description = f"Você retirou em **{multiplier:.2f}x** e ganhou **R$ {winnings:,}**!"
+            embed.color = discord.Color.green()
+            await message.edit(embed=embed, view=None)
+            return
+
+    # Se o loop terminar, o foguete explodiu
+    embed.title = "💥 EXPLODIU! 💥"
+    embed.description = f"O foguete explodiu em **{multiplier:.2f}x**. Você perdeu sua aposta de **R$ {bet:,}**."
+    embed.color = discord.Color.red()
+    await message.edit(embed=embed, view=None)
+
+
 @bot.command(name='confrontar')
 async def confront(ctx, opponent: discord.Member):
     author = ctx.author
@@ -744,12 +812,12 @@ async def best_team(ctx, user: discord.Member):
         all_user_data[target_user_id]['squad'] = [p for p in new_team if p]
         save_data(USER_DATA_FILE, all_user_data)
         save_data(CONTRACTED_PLAYERS_FILE, contracted_players)
-    await ctx.send(f"✅ Time dos sonhos montado para {user.mention}! Use `R!meutime` para ver o resultado.")
+    await ctx.send(f"✅ Time dos sonhos montado para {user.mention}! Use `{BOT_PREFIX}meutime` para ver o resultado.")
 
 @best_team.error
 async def best_team_error(ctx, error):
     if isinstance(error, commands.MissingPermissions): await ctx.send("🚫 Você não tem permissão para usar este comando.")
-    elif isinstance(error, commands.MissingRequiredArgument): await ctx.send("Uso incorreto. Formato: `R!bestteam @usuario`")
+    elif isinstance(error, commands.MissingRequiredArgument): await ctx.send(f"Uso incorreto. Formato: `{BOT_PREFIX}bestteam @usuario`")
 
 # --- EXECUÇÃO DO BOT ---
 if __name__ == "__main__":
