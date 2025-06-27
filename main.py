@@ -1,16 +1,13 @@
 # -*- coding: utf-8 -*-
 # ----------------------------------------------------------------------
-# RafutBot V17 - A Atualização Definitiva
+# RafutBot - Versão Definitiva (Estrutura Corrigida)
 # ----------------------------------------------------------------------
-# Esta versão inclui:
-# - Sistema de Clubes (nome, sigla, escudo).
-# - Sistema de Treinamento, Recompensas Diárias e Pacotes.
-# - Mercado de Transferências entre jogadores.
-# - Sistema de Conquistas, novos rankings e minigames.
+# Esta versão inclui todas as funcionalidades e a correção
+# estrutural que impedia os comandos de serem registrados.
 # ----------------------------------------------------------------------
 
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 import requests
 import json
 import os
@@ -31,9 +28,10 @@ PASTEBIN_URL = "https://pastebin.com/raw/YpjKyzdw"
 # Caminhos de arquivo para persistência no Railway/Render (Volume)
 USER_DATA_FILE = "/data/rafutbot_user_data.json"
 CONTRACTED_PLAYERS_FILE = "/data/rafutbot_contracted_players.json"
-MARKET_FILE = "/data/market.json" # Novo arquivo para o mercado
+MARKET_FILE = "/data/market.json"
 INITIAL_MONEY = 1000000000
 SALE_PERCENTAGE = 0.5
+MAX_IDOLS = 3
 
 # --- CONFIGURAÇÃO DA IA GEMINI ---
 try:
@@ -76,18 +74,13 @@ def save_data(filename, data):
 
 async def get_user_data(user_id):
     user_data = load_data(USER_DATA_FILE)
-    if str(user_id) not in user_data:
+    if str(user_id) not in user_data or "club_name" not in user_data[str(user_id)]:
         user_data[str(user_id)] = {
             "squad": [], "team": [None] * 11, "wins": 0, "money": INITIAL_MONEY,
             "club_name": None, "club_acronym": None, "club_badge": None,
             "last_daily": None, "packs": {"bronze": 0, "silver": 0, "gold": 0},
-            "achievements": []
+            "stats": {}, "match_history": []
         }
-    # Adiciona novos campos a usuários antigos, se necessário
-    elif "achievements" not in user_data[str(user_id)]:
-        user_data[str(user_id)]["achievements"] = []
-        user_data[str(user_id)]["packs"] = {"bronze": 0, "silver": 0, "gold": 0}
-
     return user_data
 
 def fetch_and_parse_players():
@@ -96,7 +89,7 @@ def fetch_and_parse_players():
         response = requests.get(PASTEBIN_URL); response.raise_for_status()
         lines = response.text.strip().split('\n')
         player_regex = re.compile(r'"(.*?)"\s+(https?://[^\s]+)\s+(\d+)\s+([A-Z/]+)\s+(\d+)')
-        ALL_PLAYERS = [{"name": match.group(1), "image": match.group(2), "overall": int(match.group(3)), "position": match.group(4), "value": int(match.group(5))} for line in lines if (match := player_regex.match(line.strip()))]
+        ALL_PLAYERS = [{"name": match.group(1), "image": match.group(2), "overall": int(match.group(3)), "position": match.group(4), "value": int(match.group(5)), "is_idol": False} for line in lines if (match := player_regex.match(line.strip()))]
         print(f"✅ Sucesso! {len(ALL_PLAYERS)} jogadores carregados.")
     except Exception as e: print(f"❌ Erro ao carregar jogadores: {e}")
 
@@ -110,39 +103,26 @@ async def generate_ai_narration(prompt_text, fallback_text):
         return fallback_text
 
 async def generate_team_image(team_players, user_name, user_badge_url=None):
-    width, height = 700, 900
-    dark_green_top = (8, 43, 27)
-    dark_green_bottom = (4, 24, 15)
-    
-    field_img = Image.new("RGB", (width, height))
-    draw = ImageDraw.Draw(field_img)
-
+    width, height = 700, 900; dark_green_top = (8, 43, 27); dark_green_bottom = (4, 24, 15)
+    field_img = Image.new("RGB", (width, height)); draw = ImageDraw.Draw(field_img)
     for y in range(height):
         ratio = y / height
-        r = int(dark_green_top[0] * (1 - ratio) + dark_green_bottom[0] * ratio)
-        g = int(dark_green_top[1] * (1 - ratio) + dark_green_bottom[1] * ratio)
-        b = int(dark_green_top[2] * (1 - ratio) + dark_green_bottom[2] * ratio)
+        r = int(dark_green_top[0] * (1 - ratio) + dark_green_bottom[0] * ratio); g = int(dark_green_top[1] * (1 - ratio) + dark_green_bottom[1] * ratio); b = int(dark_green_top[2] * (1 - ratio) + dark_green_bottom[2] * ratio)
         draw.line([(0, y), (width, y)], fill=(r, g, b))
-
     try:
-        field_lines_response = requests.get("https://i.imgur.com/83zT2A9.png")
-        field_lines_img = Image.open(BytesIO(field_lines_response.content)).convert("RGBA")
+        field_lines_response = requests.get("https://i.imgur.com/83zT2A9.png"); field_lines_img = Image.open(BytesIO(field_lines_response.content)).convert("RGBA")
         field_img.paste(field_lines_img, (0,0), field_lines_img)
     except Exception: print("Aviso: Não foi possível carregar as linhas do campo.")
-    
     try:
         title_font = ImageFont.truetype("arialbd.ttf", 42); player_name_font = ImageFont.truetype("arialbd.ttf", 18); player_stats_font = ImageFont.truetype("arial.ttf", 15); team_stats_font = ImageFont.truetype("arialbd.ttf", 24)
     except IOError: title_font = player_name_font = player_stats_font = team_stats_font = ImageFont.load_default()
-
     title_text = f"Time de {user_name}"; draw.text((350, 38), title_text, font=title_font, fill=(0,0,0,120), anchor="mt", stroke_width=2); draw.text((350, 35), title_text, font=title_font, fill="#FFFFFF", anchor="mt")
-
     if user_badge_url:
         try:
             badge_response = requests.get(user_badge_url); badge_img = Image.open(BytesIO(badge_response.content)).convert("RGBA")
             badge_img.thumbnail((80, 80), Image.Resampling.LANCZOS)
             field_img.paste(badge_img, (width - 90, 10), badge_img)
         except Exception: print(f"Não foi possível carregar o escudo de {user_badge_url}")
-
     total_overall = 0; total_value = 0
     for i, player in enumerate(team_players):
         x, y = POSITIONS_COORDS[i]
@@ -156,13 +136,12 @@ async def generate_team_image(team_players, user_name, user_badge_url=None):
                     fallback_response = requests.get("https://i.imgur.com/M43Amw2.png", timeout=5); fallback_response.raise_for_status()
                     player_img = Image.open(BytesIO(fallback_response.content)).convert("RGBA")
                 except Exception: player_img = Image.new('RGBA', (100, 100), color='grey')
-            
             await asyncio.sleep(0.05)
-            
             img_size = (100, 130); player_img.thumbnail(img_size, Image.Resampling.LANCZOS)
             paste_x = x - player_img.width // 2; paste_y = y - player_img.height // 2
             field_img.paste(player_img, (paste_x, paste_y), player_img)
             player_name_text = player['name'].split(' ')[0]; player_stats_text = f"OVR {player['overall']}"
+            if player.get('is_idol'): player_name_text = f"⭐ {player_name_text}"
             text_y = y + 70
             draw.text((x+1, text_y+1), player_name_text, font=player_name_font, fill="black", anchor="mt", stroke_width=2); draw.text((x, text_y), player_name_text, font=player_name_font, fill="white", anchor="mt")
             draw.text((x+1, text_y + 21), player_stats_text, font=player_stats_font, fill="black", anchor="mt", stroke_width=2); draw.text((x, text_y + 20), player_stats_text, font=player_stats_font, fill="yellow", anchor="mt")
@@ -341,14 +320,15 @@ class RocketView(discord.ui.View):
 # --- EVENTOS E COMANDOS ---
 @bot.event
 async def on_ready():
-    print(f'🚀 {bot.user.name} V16 (Cassino) está no ar!'); fetch_and_parse_players()
+    print(f'🚀 {bot.user.name} V17 (Lendas) está no ar!'); fetch_and_parse_players()
     await bot.change_presence(activity=discord.Game(name=f"Use {BOT_PREFIX}help"))
 
 # --- COMANDOS COMPLETOS ---
 
 @bot.command(name='help')
 async def help_command(ctx):
-    embed = discord.Embed(title="📜 Comandos do RafutBot 16.0 📜", color=discord.Color.gold())
+    embed = discord.Embed(title=f"📜 Comandos do {bot.user.name} 📜", color=discord.Color.gold())
+    embed.set_thumbnail(url=bot.user.avatar.url if bot.user.avatar else None)
     embed.add_field(name="**Diversão e Utilidades**", value="-"*25, inline=False)
     embed.add_field(name=f"📰 `{BOT_PREFIX}noticias`", value="Gera uma manchete de notícia (com IA!) sobre um jogador seu.", inline=False)
     embed.add_field(name=f"ℹ️ `{BOT_PREFIX}info <jogador>`", value="Mostra a ficha técnica de um jogador seu.", inline=False)
@@ -370,7 +350,6 @@ async def help_command(ctx):
     embed.add_field(name=f"⚽ `{BOT_PREFIX}penalty <quantia>`", value="Desafie o goleiro numa cobrança de pênalti!", inline=False)
     embed.add_field(name=f"🦊 `{BOT_PREFIX}raposa <quantia>`", value="Adivinhe a toca da Raposa do Cruzeiro!", inline=False)
     embed.add_field(name=f"🕺 `{BOT_PREFIX}drible <quantia>`", value="Aposte no drible do Adulto Ney!", inline=False)
-
     if ctx.author.guild_permissions.administrator:
         embed.add_field(name="👑 Comandos de Administrador 👑", value="-" * 25, inline=False)
         embed.add_field(name=f"⭐ `{BOT_PREFIX}bestteam @usuario`", value="Monta o melhor time possível para um usuário.", inline=False)
@@ -379,7 +358,6 @@ async def help_command(ctx):
     await ctx.send(embed=embed)
 
 async def generic_bet_handler(ctx, bet, game_logic):
-    """Função genérica para lidar com o início de uma aposta."""
     user_id = str(ctx.author.id)
     async with data_lock:
         user_data = await get_user_data(user_id)
@@ -388,11 +366,9 @@ async def generic_bet_handler(ctx, bet, game_logic):
         if user_money < bet: return await ctx.send(f"💸 Você não tem dinheiro suficiente! Saldo: R$ {user_money:,}.")
         user_data[user_id]['money'] -= bet
         save_data(USER_DATA_FILE, user_data)
-    
     await game_logic(ctx, bet)
 
 async def handle_winnings(user_id, winnings):
-    """Função genérica para adicionar ganhos ao saldo do usuário."""
     async with data_lock:
         user_data = await get_user_data(user_id)
         user_data[str(user_id)]['money'] += winnings
