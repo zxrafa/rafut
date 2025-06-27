@@ -2,11 +2,10 @@
 # ----------------------------------------------------------------------
 # RafutBot - Versão Definitiva com Visual Moderno
 # ----------------------------------------------------------------------
-# Esta versão inclui todas as funcionalidades e uma nova geração
-# de imagem para o comando 'meutime'.
+# Esta versão inclui todas as funcionalidades, novo prefixo e
+# melhorias visuais nos comandos.
 # ----------------------------------------------------------------------
 
-from keep_alive import keep_alive
 import discord
 from discord.ext import commands
 import requests
@@ -138,16 +137,10 @@ async def generate_team_image(team_players, user_name):
                     fallback_response = requests.get("https://i.imgur.com/M43Amw2.png", timeout=5); fallback_response.raise_for_status()
                     player_img = Image.open(BytesIO(fallback_response.content)).convert("RGBA")
                 except Exception: player_img = Image.new('RGBA', (100, 100), color='grey')
+            
             await asyncio.sleep(0.05)
             
-            overall = player['overall']
-            if overall >= 90: border_color = (255, 215, 0, 200) # Gold
-            elif overall >= 85: border_color = (192, 192, 192, 200) # Silver
-            else: border_color = (205, 127, 50, 200) # Bronze
-
-            card_size = (110, 110)
-            draw.ellipse((x - card_size[0]//2, y - card_size[1]//2, x + card_size[0]//2, y + card_size[1]//2), fill=border_color)
-            
+            # Cria a imagem circular pura, sem borda colorida
             img_size = (100, 100)
             mask = Image.new('L', img_size, 0)
             mask_draw = ImageDraw.Draw(mask)
@@ -159,7 +152,7 @@ async def generate_team_image(team_players, user_name):
             player_name_text = player['name'].split(' ')[0]
             player_stats_text = f"OVR {player['overall']}"
             
-            text_box_y = y + 60
+            text_box_y = y + 55
             draw.rounded_rectangle((x - 60, text_box_y, x + 60, text_box_y + 40), radius=5, fill=(0, 0, 0, 128))
             draw.text((x, text_box_y + 8), player_name_text, font=player_name_font, fill="white", anchor="mt")
             draw.text((x, text_box_y + 28), player_stats_text, font=player_stats_font, fill="yellow", anchor="mt")
@@ -222,7 +215,7 @@ class ContractView(discord.ui.View):
     async def create_embed(self, interaction: discord.Interaction = None):
         player = self.results[self.current_index]
         embed = discord.Embed(title=f"🔎 Busca: {player['name']}", color=discord.Color.blue())
-        embed.set_thumbnail(url=player['image'])
+        embed.set_image(url=player['image'])
         embed.add_field(name="Posição", value=player['position'], inline=True).add_field(name="Overall", value=player['overall'], inline=True).add_field(name="Preço", value=f"R$ {player['value']:,}", inline=True)
         embed.set_footer(text=f"Jogador {self.current_index + 1}/{len(self.results)}")
         self.prev_button.disabled = self.current_index == 0
@@ -264,7 +257,7 @@ class ActionView(discord.ui.View):
     async def create_embed(self, interaction: discord.Interaction = None):
         player = self.results[self.current_index]
         embed = discord.Embed(title=f"Selecione para '{self.action_name}'", color=discord.Color.orange())
-        embed.set_thumbnail(url=player['image'])
+        embed.set_image(url=player['image'])
         embed.add_field(name="Jogador", value=f"**{player['name']}**", inline=False)
         embed.add_field(name="Posição", value=player['position'], inline=True); embed.add_field(name="Overall", value=player['overall'], inline=True)
         embed.set_footer(text=f"Jogador {self.current_index + 1}/{len(self.results)}")
@@ -336,7 +329,7 @@ async def news(ctx):
     msg = await ctx.send(f"📰 Buscando as últimas fofocas sobre **{player['name']}** nos arquivos da IA...")
     headline = await generate_ai_narration(prompt, f" manchete sobre {player['name']} não encontrada.")
     embed = discord.Embed(title="🗞️ PLANTÃO RAFUTNEWS 🗞️", description=f"## \"{headline}\"", color=discord.Color.blurple())
-    embed.set_thumbnail(url=player['image'])
+    embed.set_image(url=player['image'])
     embed.set_footer(text=f"Uma fonte totalmente confiável, com certeza.")
     await msg.edit(content="", embed=embed)
 
@@ -348,7 +341,7 @@ async def info(ctx, *, query: str):
     target_player = next((p for p in squad if search_query in normalize_str(p['name'])), None)
     if not target_player: return await ctx.send(f"Jogador `{query}` não encontrado no seu elenco.")
     embed = discord.Embed(title=f"Ficha Técnica - {target_player['name']}", color=discord.Color.dark_green())
-    embed.set_thumbnail(url=target_player['image'])
+    embed.set_image(url=target_player['image'])
     embed.add_field(name="Overall", value=f"**{target_player['overall']}** ⭐", inline=True)
     embed.add_field(name="Posição", value=f"**{target_player['position']}**", inline=True)
     embed.add_field(name="Valor de Mercado", value=f"**R$ {target_player['value']:,}** 💸", inline=False)
@@ -397,7 +390,7 @@ async def get_player(ctx):
         player = random.choice(available); contracted.append(player["name"]); save_data(CONTRACTED_PLAYERS_FILE, contracted)
     sale_price = int(player['value'] * SALE_PERCENTAGE)
     embed = discord.Embed(title="🃏 Você tirou uma carta!", color=discord.Color.blue())
-    embed.set_thumbnail(url=player["image"])
+    embed.set_image(url=player["image"])
     embed.add_field(name=player['name'], value=f"**Overall:** {player['overall']} | **Posição:** {player['position']}")
     embed.add_field(name="Valor de Venda Rápida", value=f"R$ {sale_price:,}")
     view = KeepOrSellView(ctx.author, player); message = await ctx.send(embed=embed, view=view); view.message = message
