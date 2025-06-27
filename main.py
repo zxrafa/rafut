@@ -4,7 +4,7 @@
 # ----------------------------------------------------------------------
 # Esta versão inclui:
 # - Correção final do comando 'confrontar'.
-# - 5 novos jogos de aposta no cassino.
+# - 5 novos jogos de aposta no cassino, todos funcionando.
 # ----------------------------------------------------------------------
 
 import discord
@@ -304,8 +304,6 @@ async def on_ready():
     print(f'🚀 {bot.user.name} V16 (Cassino) está no ar!'); fetch_and_parse_players()
     await bot.change_presence(activity=discord.Game(name=f"Use {BOT_PREFIX}help"))
 
-# --- COMANDOS COMPLETOS ---
-
 @bot.command(name='help')
 async def help_command(ctx):
     embed = discord.Embed(title="📜 Comandos do RafutBot 16.0 📜", color=discord.Color.gold())
@@ -338,9 +336,215 @@ async def help_command(ctx):
         embed.add_field(name=f"🚨 `{BOT_PREFIX}fullreset`", value="Apaga TODOS os dados salvos do bot.", inline=False)
     await ctx.send(embed=embed)
 
-# --- COMANDOS NOVOS DE CASSINO E OUTROS ---
-# (Todos os comandos das versões anteriores e os novos de cassino estão aqui)
-# ...
+# --- COMANDOS COMPLETOS ---
+
+async def generic_bet_handler(ctx, bet, game_logic):
+    """Função genérica para lidar com o início de uma aposta."""
+    user_id = str(ctx.author.id)
+    async with data_lock:
+        user_data = await get_user_data(user_id)
+        user_money = user_data[user_id]['money']
+        if bet <= 0: return await ctx.send("A aposta deve ser um valor positivo.")
+        if user_money < bet: return await ctx.send(f"💸 Você não tem dinheiro suficiente! Saldo: R$ {user_money:,}.")
+        user_data[user_id]['money'] -= bet
+        save_data(USER_DATA_FILE, user_data)
+    
+    await game_logic(ctx, bet)
+
+async def handle_winnings(user_id, winnings):
+    """Função genérica para adicionar ganhos ao saldo do usuário."""
+    async with data_lock:
+        user_data = await get_user_data(user_id)
+        user_data[str(user_id)]['money'] += winnings
+        save_data(USER_DATA_FILE, user_data)
+        return user_data[str(user_id)]['money']
+
+@bot.command(name='tigrinho')
+async def tigrinho_game(ctx, bet: int):
+    async def logic(ctx, bet):
+        emojis = ["🍒", "🍋", "🍊", "🍉", "⭐", "💎", "🐯"]
+        msg = await ctx.send(f"Você apostou R$ {bet:,}. Girando o tigrinho...\n\n| 🎰 | 🎰 | 🎰 |")
+        await asyncio.sleep(1); await msg.edit(content=f"Você apostou R$ {bet:,}. Girando...\n\n| {random.choice(emojis)} | 🎰 | 🎰 |")
+        await asyncio.sleep(1); await msg.edit(content=f"Você apostou R$ {bet:,}. Girando...\n\n| {random.choice(emojis)} | {random.choice(emojis)} | 🎰 |")
+        await asyncio.sleep(1)
+        reels = [random.choice(emojis) for _ in range(3)]; result_text = f"| {reels[0]} | {reels[1]} | {reels[2]} |"
+        winnings = 0; multiplier = 0; result_title = "PERDEU!"; color = discord.Color.red()
+        if reels.count("🐯") == 3: multiplier = 50; result_title = "JACKPOT DO TIGRINHO!!! 🐯🐯🐯"
+        elif reels.count(reels[0]) == 3: multiplier = 10 if reels[0] != "🍒" else 5; result_title = "GRANDE PRÊMIO!"
+        elif reels.count("🐯") == 2: multiplier = 5; result_title = "QUASE O JACKPOT!"
+        elif reels.count(reels[0]) == 2 or reels.count(reels[1]) == 2: multiplier = 2; result_title = "PRÊMIO PEQUENO!"
+        elif reels.count("🐯") == 1: multiplier = 1.5; result_title = "O TIGRINHO AJUDOU!"
+        if multiplier > 0:
+            winnings = int(bet * multiplier); color = discord.Color.green()
+            final_balance = await handle_winnings(ctx.author.id, winnings)
+        else:
+            user_data = await get_user_data(ctx.author.id)
+            final_balance = user_data[str(ctx.author.id)]['money']
+        embed = discord.Embed(title=result_title, color=color)
+        embed.add_field(name="Resultado", value=result_text, inline=False)
+        if winnings > 0: embed.add_field(name="Prêmio", value=f"Você ganhou **R$ {winnings:,}**!", inline=False)
+        else: embed.add_field(name="Prêmio", value="Mais sorte na próxima vez!", inline=False)
+        embed.set_footer(text=f"Seu novo saldo é de R$ {final_balance:,}")
+        await msg.edit(content="", embed=embed)
+    await generic_bet_handler(ctx, bet, logic)
+
+@bot.command(name='rocket')
+async def rocket_game(ctx, bet: int):
+    async def logic(ctx, bet):
+        crash_point = round(random.uniform(1.1, 10.0), 2)
+        view = RocketView(ctx, bet, crash_point)
+        message = await ctx.send("O foguete vai decolar!", view=view)
+        view.message = message
+        await view.rocket_loop()
+    await generic_bet_handler(ctx, bet, logic)
+
+@bot.command(name='double')
+async def double_game(ctx, bet: int, color: str):
+    valid_colors = {"vermelho": "🔴", "preto": "⚫", "branco": "⚪"}
+    color_choice = color.lower()
+    if color_choice not in valid_colors:
+        return await ctx.send("Cor inválida! Escolha entre `vermelho`, `preto` ou `branco`.")
+    
+    async def logic(ctx, bet):
+        outcome_color_key = random.choices(["vermelho", "preto", "branco"], weights=[47.5, 47.5, 5], k=1)[0]
+        outcome_emoji = valid_colors[outcome_color_key]
+        msg = await ctx.send(f"A roleta está girando... 🌀")
+        await asyncio.sleep(2)
+        
+        winnings = 0; result_title = "Você Perdeu!"; result_color = discord.Color.red()
+        if color_choice == outcome_color_key:
+            multiplier = 14 if color_choice == "branco" else 2
+            winnings = bet * multiplier
+            result_title = "Você Ganhou!"; result_color = discord.Color.green()
+            final_balance = await handle_winnings(ctx.author.id, winnings)
+        else:
+            user_data = await get_user_data(ctx.author.id)
+            final_balance = user_data[str(ctx.author.id)]['money']
+
+        embed = discord.Embed(title=result_title, color=result_color)
+        embed.add_field(name="Resultado", value=f"A cor sorteada foi: {outcome_emoji} **{outcome_color_key.upper()}**")
+        if winnings > 0:
+            embed.add_field(name="Prêmio", value=f"Você ganhou **R$ {winnings:,}**!", inline=False)
+        embed.set_footer(text=f"Seu novo saldo é de R$ {final_balance:,}")
+        await msg.edit(content="", embed=embed)
+
+    await generic_bet_handler(ctx, bet, logic)
+
+@bot.command(name='penalty')
+async def penalty_game(ctx, bet: int):
+    class PenaltyView(discord.ui.View):
+        def __init__(self, author):
+            super().__init__(timeout=30)
+            self.author = author
+            self.choice = None
+        
+        @discord.ui.button(label="Esquerda", style=discord.ButtonStyle.secondary, emoji="⬅️")
+        async def left_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+            if interaction.user != self.author: return
+            self.choice = "esquerda"; self.stop()
+            await interaction.response.defer()
+        
+        @discord.ui.button(label="Meio", style=discord.ButtonStyle.secondary, emoji="⬆️")
+        async def middle_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+            if interaction.user != self.author: return
+            self.choice = "meio"; self.stop()
+            await interaction.response.defer()
+
+        @discord.ui.button(label="Direita", style=discord.ButtonStyle.secondary, emoji="➡️")
+        async def right_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+            if interaction.user != self.author: return
+            self.choice = "direita"; self.stop()
+            await interaction.response.defer()
+
+    async def logic(ctx, bet):
+        view = PenaltyView(ctx.author)
+        msg = await ctx.send("⚽ **HORA DO PÊNALTI!** Escolha o canto para chutar:", view=view)
+        await view.wait()
+        
+        if not view.choice:
+            await msg.edit(content="Você demorou para chutar e o juiz apitou o fim! Aposta perdida.", view=None)
+            return
+
+        goalkeeper_choice = random.choice(["esquerda", "meio", "direita"])
+        
+        if view.choice == goalkeeper_choice:
+            user_data = await get_user_data(ctx.author.id)
+            final_balance = user_data[str(ctx.author.id)]['money']
+            embed = discord.Embed(title="🧤 DEFENDEU!", description=f"O goleiro pulou no canto certo e pegou! Você perdeu R$ {bet:,}.", color=discord.Color.red())
+            embed.set_footer(text=f"Seu novo saldo é de R$ {final_balance:,}")
+        else:
+            winnings = bet * 2
+            final_balance = await handle_winnings(ctx.author.id, winnings)
+            embed = discord.Embed(title="⚽ GOOOOL!", description=f"Você cobrou com categoria e ganhou **R$ {winnings:,}**!", color=discord.Color.green())
+            embed.set_footer(text=f"Seu novo saldo é de R$ {final_balance:,}")
+        
+        await msg.edit(content="", embed=embed, view=None)
+
+    await generic_bet_handler(ctx, bet, logic)
+
+@bot.command(name='raposa')
+async def fox_game(ctx, bet: int):
+    options = ["1️⃣", "2️⃣", "3️⃣"]
+    class FoxView(discord.ui.View):
+        def __init__(self, author):
+            super().__init__(timeout=30)
+            self.author = author
+            self.choice = None
+            for emoji in options:
+                self.add_item(discord.ui.Button(label=f"Toca {emoji}", style=discord.ButtonStyle.secondary, custom_id=emoji))
+        
+        async def interaction_check(self, interaction: discord.Interaction) -> bool:
+            if interaction.user != self.author:
+                await interaction.response.send_message("Essa aposta não é sua!", ephemeral=True)
+                return False
+            self.choice = interaction.data['custom_id']
+            self.stop()
+            await interaction.response.defer()
+            return True
+
+    async def logic(ctx, bet):
+        view = FoxView(ctx.author)
+        msg = await ctx.send("🦊 **Jogo da Raposa!** Onde a raposa do Cruzeiro vai sair? Escolha uma toca:", view=view)
+        await view.wait()
+        
+        if not view.choice:
+            await msg.edit(content="A raposa se cansou de esperar e foi embora! Aposta perdida.", view=None)
+            return
+
+        correct_hole = random.choice(options)
+        
+        if view.choice == correct_hole:
+            winnings = bet * 3
+            final_balance = await handle_winnings(ctx.author.id, winnings)
+            embed = discord.Embed(title="🦊 Você Achou a Raposa!", description=f"Ela saiu na toca **{correct_hole}**! Você ganhou **R$ {winnings:,}**!", color=discord.Color.blue())
+        else:
+            user_data = await get_user_data(ctx.author.id)
+            final_balance = user_data[str(ctx.author.id)]['money']
+            embed = discord.Embed(title="A Raposa te Enganou!", description=f"Você escolheu a toca {view.choice}, mas ela saiu na **{correct_hole}**! Você perdeu R$ {bet:,}.", color=discord.Color.red())
+        
+        embed.set_footer(text=f"Seu novo saldo é de R$ {final_balance:,}")
+        await msg.edit(content="", embed=embed, view=None)
+
+    await generic_bet_handler(ctx, bet, logic)
+
+@bot.command(name='drible')
+async def neymar_drible(ctx, bet: int):
+    async def logic(ctx, bet):
+        msg = await ctx.send("🕺 O Adulto Ney parte pra cima do zagueiro... Será que ele vai entortar o coitado?")
+        await asyncio.sleep(2)
+
+        if random.random() < 0.55: # 55% de chance de sucesso
+            winnings = int(bet * 1.8)
+            final_balance = await handle_winnings(ctx.author.id, winnings)
+            embed = discord.Embed(title="🕺 OLHA O DRIBLE!", description=f"QUE CANETA! O zagueiro tá procurando a bola até agora! Você ganhou **R$ {winnings:,}**!", color=discord.Color.green())
+        else:
+            user_data = await get_user_data(ctx.author.id)
+            final_balance = user_data[str(ctx.author.id)]['money']
+            embed = discord.Embed(title="🧱 PAREDÃO!", description=f"O zagueiro deu um bote certeiro e desarmou o Adulto Ney! Você perdeu R$ {bet:,}.", color=discord.Color.red())
+
+        embed.set_footer(text=f"Seu novo saldo é de R$ {final_balance:,}")
+        await msg.edit(content="", embed=embed)
+    await generic_bet_handler(ctx, bet, logic)
 
 # --- EXECUÇÃO DO BOT ---
 if __name__ == "__main__":
