@@ -1,13 +1,14 @@
 # -*- coding: utf-8 -*-
 # ----------------------------------------------------------------------
-# RafutBot - Versão Definitiva (100% Completo e Corrigido)
+# RafutBot V16 - Edição Cassino Royale (Completo e Corrigido)
 # ----------------------------------------------------------------------
-# Esta versão inclui todas as funcionalidades e correções para
-# hospedagem persistente e todos os comandos.
+# Esta versão inclui:
+# - Correção final do comando 'confrontar'.
+# - 5 novos jogos de aposta no cassino, todos funcionando.
 # ----------------------------------------------------------------------
 
 import discord
-from discord.ext import commands, tasks
+from discord.ext import commands
 import requests
 import json
 import os
@@ -15,23 +16,19 @@ import random
 import re
 import asyncio
 import unicodedata
-from PIL import Image, ImageDraw, ImageFont, UnidentifiedImageError, ImageFilter
+from PIL import Image, ImageDraw, ImageFont, UnidentifiedImageError
 from io import BytesIO
 from keep_alive import keep_alive
 import google.generativeai as genai
 import math
-from datetime import datetime, timedelta
 
 # --- CONFIGURAÇÕES GERAIS ---
 BOT_PREFIX = "--"
 PASTEBIN_URL = "https://pastebin.com/raw/YpjKyzdw"
-# Caminhos de arquivo para persistência no Railway/Render (Volume)
 USER_DATA_FILE = "/data/rafutbot_user_data.json"
 CONTRACTED_PLAYERS_FILE = "/data/rafutbot_contracted_players.json"
-MARKET_FILE = "/data/market.json"
 INITIAL_MONEY = 1000000000
 SALE_PERCENTAGE = 0.5
-MAX_IDOLS = 3
 
 # --- CONFIGURAÇÃO DA IA GEMINI ---
 try:
@@ -60,27 +57,18 @@ def normalize_str(s):
     return ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn').lower()
 
 def load_data(filename):
-    if not os.path.exists(filename):
-        if 'market' in filename: return []
-        return {} if filename == USER_DATA_FILE else []
+    if not os.path.exists(filename): return {} if filename == USER_DATA_FILE else []
     try:
         with open(filename, 'r', encoding='utf-8') as f: return json.load(f)
-    except (json.JSONDecodeError, FileNotFoundError):
-        if 'market' in filename: return []
-        return {} if filename == USER_DATA_FILE else []
+    except (json.JSONDecodeError, FileNotFoundError): return {} if filename == USER_DATA_FILE else []
 
 def save_data(filename, data):
     with open(filename, 'w', encoding='utf-8') as f: json.dump(data, f, indent=4, ensure_ascii=False)
 
 async def get_user_data(user_id):
     user_data = load_data(USER_DATA_FILE)
-    if str(user_id) not in user_data or "club_name" not in user_data[str(user_id)]:
-        user_data[str(user_id)] = {
-            "squad": [], "team": [None] * 11, "wins": 0, "money": INITIAL_MONEY,
-            "club_name": None, "club_acronym": None, "club_badge": None,
-            "last_daily": None, "packs": {"bronze": 0, "silver": 0, "gold": 0},
-            "stats": {}, "match_history": []
-        }
+    if str(user_id) not in user_data or "money" not in user_data[str(user_id)]:
+        user_data[str(user_id)] = {"squad": [], "team": [None] * 11, "wins": 0, "money": INITIAL_MONEY}
     return user_data
 
 def fetch_and_parse_players():
@@ -89,7 +77,7 @@ def fetch_and_parse_players():
         response = requests.get(PASTEBIN_URL); response.raise_for_status()
         lines = response.text.strip().split('\n')
         player_regex = re.compile(r'"(.*?)"\s+(https?://[^\s]+)\s+(\d+)\s+([A-Z/]+)\s+(\d+)')
-        ALL_PLAYERS = [{"name": match.group(1), "image": match.group(2), "overall": int(match.group(3)), "position": match.group(4), "value": int(match.group(5)), "is_idol": False} for line in lines if (match := player_regex.match(line.strip()))]
+        ALL_PLAYERS = [{"name": match.group(1), "image": match.group(2), "overall": int(match.group(3)), "position": match.group(4), "value": int(match.group(5))} for line in lines if (match := player_regex.match(line.strip()))]
         print(f"✅ Sucesso! {len(ALL_PLAYERS)} jogadores carregados.")
     except Exception as e: print(f"❌ Erro ao carregar jogadores: {e}")
 
@@ -102,7 +90,7 @@ async def generate_ai_narration(prompt_text, fallback_text):
         print(f"Erro na API Gemini: {e}")
         return fallback_text
 
-async def generate_team_image(team_players, user_name, user_badge_url=None):
+async def generate_team_image(team_players, user_name):
     width, height = 700, 900; dark_green_top = (8, 43, 27); dark_green_bottom = (4, 24, 15)
     field_img = Image.new("RGB", (width, height)); draw = ImageDraw.Draw(field_img)
     for y in range(height):
@@ -117,12 +105,6 @@ async def generate_team_image(team_players, user_name, user_badge_url=None):
         title_font = ImageFont.truetype("arialbd.ttf", 42); player_name_font = ImageFont.truetype("arialbd.ttf", 18); player_stats_font = ImageFont.truetype("arial.ttf", 15); team_stats_font = ImageFont.truetype("arialbd.ttf", 24)
     except IOError: title_font = player_name_font = player_stats_font = team_stats_font = ImageFont.load_default()
     title_text = f"Time de {user_name}"; draw.text((350, 38), title_text, font=title_font, fill=(0,0,0,120), anchor="mt", stroke_width=2); draw.text((350, 35), title_text, font=title_font, fill="#FFFFFF", anchor="mt")
-    if user_badge_url:
-        try:
-            badge_response = requests.get(user_badge_url); badge_img = Image.open(BytesIO(badge_response.content)).convert("RGBA")
-            badge_img.thumbnail((80, 80), Image.Resampling.LANCZOS)
-            field_img.paste(badge_img, (width - 90, 10), badge_img)
-        except Exception: print(f"Não foi possível carregar o escudo de {user_badge_url}")
     total_overall = 0; total_value = 0
     for i, player in enumerate(team_players):
         x, y = POSITIONS_COORDS[i]
@@ -141,7 +123,6 @@ async def generate_team_image(team_players, user_name, user_badge_url=None):
             paste_x = x - player_img.width // 2; paste_y = y - player_img.height // 2
             field_img.paste(player_img, (paste_x, paste_y), player_img)
             player_name_text = player['name'].split(' ')[0]; player_stats_text = f"OVR {player['overall']}"
-            if player.get('is_idol'): player_name_text = f"⭐ {player_name_text}"
             text_y = y + 70
             draw.text((x+1, text_y+1), player_name_text, font=player_name_font, fill="black", anchor="mt", stroke_width=2); draw.text((x, text_y), player_name_text, font=player_name_font, fill="white", anchor="mt")
             draw.text((x+1, text_y + 21), player_stats_text, font=player_stats_font, fill="black", anchor="mt", stroke_width=2); draw.text((x, text_y + 20), player_stats_text, font=player_stats_font, fill="yellow", anchor="mt")
@@ -320,15 +301,12 @@ class RocketView(discord.ui.View):
 # --- EVENTOS E COMANDOS ---
 @bot.event
 async def on_ready():
-    print(f'🚀 {bot.user.name} V17 (Lendas) está no ar!'); fetch_and_parse_players()
+    print(f'🚀 {bot.user.name} V16 (Cassino) está no ar!'); fetch_and_parse_players()
     await bot.change_presence(activity=discord.Game(name=f"Use {BOT_PREFIX}help"))
-
-# --- COMANDOS COMPLETOS ---
 
 @bot.command(name='help')
 async def help_command(ctx):
-    embed = discord.Embed(title=f"📜 Comandos do {bot.user.name} 📜", color=discord.Color.gold())
-    embed.set_thumbnail(url=bot.user.avatar.url if bot.user.avatar else None)
+    embed = discord.Embed(title="📜 Comandos do RafutBot 16.0 📜", color=discord.Color.gold())
     embed.add_field(name="**Diversão e Utilidades**", value="-"*25, inline=False)
     embed.add_field(name=f"📰 `{BOT_PREFIX}noticias`", value="Gera uma manchete de notícia (com IA!) sobre um jogador seu.", inline=False)
     embed.add_field(name=f"ℹ️ `{BOT_PREFIX}info <jogador>`", value="Mostra a ficha técnica de um jogador seu.", inline=False)
@@ -358,7 +336,10 @@ async def help_command(ctx):
         embed.add_field(name=f"🚨 `{BOT_PREFIX}fullreset`", value="Apaga TODOS os dados salvos do bot.", inline=False)
     await ctx.send(embed=embed)
 
+# --- COMANDOS COMPLETOS ---
+
 async def generic_bet_handler(ctx, bet, game_logic):
+    """Função genérica para lidar com o início de uma aposta."""
     user_id = str(ctx.author.id)
     async with data_lock:
         user_data = await get_user_data(user_id)
@@ -367,9 +348,11 @@ async def generic_bet_handler(ctx, bet, game_logic):
         if user_money < bet: return await ctx.send(f"💸 Você não tem dinheiro suficiente! Saldo: R$ {user_money:,}.")
         user_data[user_id]['money'] -= bet
         save_data(USER_DATA_FILE, user_data)
+    
     await game_logic(ctx, bet)
 
 async def handle_winnings(user_id, winnings):
+    """Função genérica para adicionar ganhos ao saldo do usuário."""
     async with data_lock:
         user_data = await get_user_data(user_id)
         user_data[str(user_id)]['money'] += winnings
@@ -421,11 +404,13 @@ async def double_game(ctx, bet: int, color: str):
     color_choice = color.lower()
     if color_choice not in valid_colors:
         return await ctx.send("Cor inválida! Escolha entre `vermelho`, `preto` ou `branco`.")
+    
     async def logic(ctx, bet):
         outcome_color_key = random.choices(["vermelho", "preto", "branco"], weights=[47.5, 47.5, 5], k=1)[0]
         outcome_emoji = valid_colors[outcome_color_key]
         msg = await ctx.send(f"A roleta está girando... 🌀")
         await asyncio.sleep(2)
+        
         winnings = 0; result_title = "Você Perdeu!"; result_color = discord.Color.red()
         if color_choice == outcome_color_key:
             multiplier = 14 if color_choice == "branco" else 2
@@ -435,12 +420,14 @@ async def double_game(ctx, bet: int, color: str):
         else:
             user_data = await get_user_data(ctx.author.id)
             final_balance = user_data[str(ctx.author.id)]['money']
+
         embed = discord.Embed(title=result_title, color=result_color)
         embed.add_field(name="Resultado", value=f"A cor sorteada foi: {outcome_emoji} **{outcome_color_key.upper()}**")
         if winnings > 0:
             embed.add_field(name="Prêmio", value=f"Você ganhou **R$ {winnings:,}**!", inline=False)
         embed.set_footer(text=f"Seu novo saldo é de R$ {final_balance:,}")
         await msg.edit(content="", embed=embed)
+
     await generic_bet_handler(ctx, bet, logic)
 
 @bot.command(name='penalty')
@@ -448,33 +435,51 @@ async def penalty_game(ctx, bet: int):
     class PenaltyView(discord.ui.View):
         def __init__(self, author):
             super().__init__(timeout=30)
-            self.author = author; self.choice = None
+            self.author = author
+            self.choice = None
+        
         @discord.ui.button(label="Esquerda", style=discord.ButtonStyle.secondary, emoji="⬅️")
         async def left_button(self, interaction: discord.Interaction, button: discord.ui.Button):
             if interaction.user != self.author: return
-            self.choice = "esquerda"; self.stop(); await interaction.response.defer()
+            self.choice = "esquerda"; self.stop()
+            await interaction.response.defer()
+        
         @discord.ui.button(label="Meio", style=discord.ButtonStyle.secondary, emoji="⬆️")
         async def middle_button(self, interaction: discord.Interaction, button: discord.ui.Button):
             if interaction.user != self.author: return
-            self.choice = "meio"; self.stop(); await interaction.response.defer()
+            self.choice = "meio"; self.stop()
+            await interaction.response.defer()
+
         @discord.ui.button(label="Direita", style=discord.ButtonStyle.secondary, emoji="➡️")
         async def right_button(self, interaction: discord.Interaction, button: discord.ui.Button):
             if interaction.user != self.author: return
-            self.choice = "direita"; self.stop(); await interaction.response.defer()
+            self.choice = "direita"; self.stop()
+            await interaction.response.defer()
+
     async def logic(ctx, bet):
         view = PenaltyView(ctx.author)
         msg = await ctx.send("⚽ **HORA DO PÊNALTI!** Escolha o canto para chutar:", view=view)
         await view.wait()
-        if not view.choice: await msg.edit(content="Você demorou para chutar e o juiz apitou o fim! Aposta perdida.", view=None); return
+        
+        if not view.choice:
+            await msg.edit(content="Você demorou para chutar e o juiz apitou o fim! Aposta perdida.", view=None)
+            return
+
         goalkeeper_choice = random.choice(["esquerda", "meio", "direita"])
+        
         if view.choice == goalkeeper_choice:
-            user_data = await get_user_data(ctx.author.id); final_balance = user_data[str(ctx.author.id)]['money']
+            user_data = await get_user_data(ctx.author.id)
+            final_balance = user_data[str(ctx.author.id)]['money']
             embed = discord.Embed(title="🧤 DEFENDEU!", description=f"O goleiro pulou no canto certo e pegou! Você perdeu R$ {bet:,}.", color=discord.Color.red())
+            embed.set_footer(text=f"Seu novo saldo é de R$ {final_balance:,}")
         else:
-            winnings = bet * 2; final_balance = await handle_winnings(ctx.author.id, winnings)
+            winnings = bet * 2
+            final_balance = await handle_winnings(ctx.author.id, winnings)
             embed = discord.Embed(title="⚽ GOOOOL!", description=f"Você cobrou com categoria e ganhou **R$ {winnings:,}**!", color=discord.Color.green())
-        embed.set_footer(text=f"Seu novo saldo é de R$ {final_balance:,}")
+            embed.set_footer(text=f"Seu novo saldo é de R$ {final_balance:,}")
+        
         await msg.edit(content="", embed=embed, view=None)
+
     await generic_bet_handler(ctx, bet, logic)
 
 @bot.command(name='raposa')
@@ -483,26 +488,43 @@ async def fox_game(ctx, bet: int):
     class FoxView(discord.ui.View):
         def __init__(self, author):
             super().__init__(timeout=30)
-            self.author = author; self.choice = None
+            self.author = author
+            self.choice = None
             for emoji in options:
                 self.add_item(discord.ui.Button(label=f"Toca {emoji}", style=discord.ButtonStyle.secondary, custom_id=emoji))
+        
         async def interaction_check(self, interaction: discord.Interaction) -> bool:
-            if interaction.user != self.author: await interaction.response.send_message("Essa aposta não é sua!", ephemeral=True); return False
-            self.choice = interaction.data['custom_id']; self.stop(); await interaction.response.defer()
+            if interaction.user != self.author:
+                await interaction.response.send_message("Essa aposta não é sua!", ephemeral=True)
+                return False
+            self.choice = interaction.data['custom_id']
+            self.stop()
+            await interaction.response.defer()
             return True
+
     async def logic(ctx, bet):
         view = FoxView(ctx.author)
         msg = await ctx.send("🦊 **Jogo da Raposa!** Onde a raposa do Cruzeiro vai sair? Escolha uma toca:", view=view)
         await view.wait()
-        if not view.choice: await msg.edit(content="A raposa se cansou de esperar e foi embora! Aposta perdida.", view=None); return
+        
+        if not view.choice:
+            await msg.edit(content="A raposa se cansou de esperar e foi embora! Aposta perdida.", view=None)
+            return
+
         correct_hole = random.choice(options)
+        
         if view.choice == correct_hole:
-            winnings = bet * 3; final_balance = await handle_winnings(ctx.author.id, winnings)
+            winnings = bet * 3
+            final_balance = await handle_winnings(ctx.author.id, winnings)
             embed = discord.Embed(title="🦊 Você Achou a Raposa!", description=f"Ela saiu na toca **{correct_hole}**! Você ganhou **R$ {winnings:,}**!", color=discord.Color.blue())
         else:
-            user_data = await get_user_data(ctx.author.id); final_balance = user_data[str(ctx.author.id)]['money']
+            user_data = await get_user_data(ctx.author.id)
+            final_balance = user_data[str(ctx.author.id)]['money']
             embed = discord.Embed(title="A Raposa te Enganou!", description=f"Você escolheu a toca {view.choice}, mas ela saiu na **{correct_hole}**! Você perdeu R$ {bet:,}.", color=discord.Color.red())
-        embed.set_footer(text=f"Seu novo saldo é de R$ {final_balance:,}"); await msg.edit(content="", embed=embed, view=None)
+        
+        embed.set_footer(text=f"Seu novo saldo é de R$ {final_balance:,}")
+        await msg.edit(content="", embed=embed, view=None)
+
     await generic_bet_handler(ctx, bet, logic)
 
 @bot.command(name='drible')
@@ -510,185 +532,19 @@ async def neymar_drible(ctx, bet: int):
     async def logic(ctx, bet):
         msg = await ctx.send("🕺 O Adulto Ney parte pra cima do zagueiro... Será que ele vai entortar o coitado?")
         await asyncio.sleep(2)
-        if random.random() < 0.55:
-            winnings = int(bet * 1.8); final_balance = await handle_winnings(ctx.author.id, winnings)
+
+        if random.random() < 0.55: # 55% de chance de sucesso
+            winnings = int(bet * 1.8)
+            final_balance = await handle_winnings(ctx.author.id, winnings)
             embed = discord.Embed(title="🕺 OLHA O DRIBLE!", description=f"QUE CANETA! O zagueiro tá procurando a bola até agora! Você ganhou **R$ {winnings:,}**!", color=discord.Color.green())
         else:
-            user_data = await get_user_data(ctx.author.id); final_balance = user_data[str(ctx.author.id)]['money']
+            user_data = await get_user_data(ctx.author.id)
+            final_balance = user_data[str(ctx.author.id)]['money']
             embed = discord.Embed(title="🧱 PAREDÃO!", description=f"O zagueiro deu um bote certeiro e desarmou o Adulto Ney! Você perdeu R$ {bet:,}.", color=discord.Color.red())
-        embed.set_footer(text=f"Seu novo saldo é de R$ {final_balance:,}"); await msg.edit(content="", embed=embed)
+
+        embed.set_footer(text=f"Seu novo saldo é de R$ {final_balance:,}")
+        await msg.edit(content="", embed=embed)
     await generic_bet_handler(ctx, bet, logic)
-
-@bot.command(name='confrontar')
-async def confront(ctx, opponent: discord.Member):
-    author = ctx.author
-    if author == opponent: return await ctx.send("😑 Você não pode se desafiar.")
-    if opponent.bot: return await ctx.send("🤖 Você não pode desafiar um bot.")
-    async with data_lock:
-        all_data = load_data(USER_DATA_FILE)
-        author_id, opp_id = str(author.id), str(opponent.id)
-        if not (author_id in all_data and opp_id in all_data): return await ctx.send("Um dos jogadores não tem dados.")
-        author_team = all_data[author_id].get("team", []); opp_team = all_data[opp_id].get("team", [])
-        if None in author_team or None in opp_team: return await ctx.send("⚠️ **Times Incompletos!** Ambos precisam ter 11 jogadores escalados.")
-    def get_team_sector(team, positions): return [p for p in team if p and p['position'] in positions]
-    teams = {
-        author.id: {"user": author, "players": author_team, "attack": get_team_sector(author_team, ['PE', 'PD', 'CA', 'MEI']), "mid": get_team_sector(author_team, ['MC', 'VOL']), "def": get_team_sector(author_team, ['ZAG', 'LE', 'LD']), "keeper": get_team_sector(author_team, ['GOL'])[0]},
-        opponent.id: {"user": opponent, "players": opp_team, "attack": get_team_sector(opp_team, ['PE', 'PD', 'CA', 'MEI']), "mid": get_team_sector(opp_team, ['MC', 'VOL']), "def": get_team_sector(opp_team, ['ZAG', 'LE', 'LD']), "keeper": get_team_sector(opp_team, ['GOL'])[0]}
-    }
-    score = {author.id: 0, opponent.id: 0}; goalscorers = {author.id: [], opponent.id: []}; match_log = ["🎙️ **Narrador:** Começa o jogo! Uma grande partida nos espera!"]
-    embed = discord.Embed(title=f"🔵 {author.display_name} vs {opponent.display_name} 🔴", color=discord.Color.greyple())
-    embed.add_field(name="Placar", value=f"0 - 0", inline=False).add_field(name="Ao Vivo 🔴", value="```\n" + "\n".join(match_log) + "\n```", inline=False)
-    match_message = await ctx.send(embed=embed)
-    ball_holder = None; possession_team_id = random.choice([author.id, opponent.id])
-    for minute in range(1, 92):
-        await asyncio.sleep(1.5)
-        mid_battle = sum(p['overall'] for p in teams[author.id]["mid"]) - sum(p['overall'] for p in teams[opponent.id]["mid"])
-        if random.random() < (0.5 + mid_battle / 250): possession_team_id = author.id
-        else: possession_team_id = opponent.id
-        attacker_id = possession_team_id; defender_id = opponent.id if possession_team_id == author.id else author.id
-        event_chance = (sum(p['overall'] for p in teams[attacker_id]["attack"]) / len(teams[attacker_id]["attack"])) / 250.0
-        if random.random() > event_chance:
-            if not ball_holder: ball_holder = random.choice(teams[attacker_id]["mid"])
-            new_ball_holder = random.choice(teams[attacker_id]["players"])
-            log_entry = f"{minute}' - **{teams[attacker_id]['user'].display_name}** com a posse. **{ball_holder['name']}** toca para **{new_ball_holder['name']}**."
-            ball_holder = new_ball_holder
-        else:
-            playmaker = random.choice(teams[attacker_id]["mid"]); attacker = random.choice(teams[attacker_id]["attack"]); defender = random.choice(teams[defender_id]["def"]); keeper = teams[defender_id]["keeper"]
-            log_entry = f"⚡ {minute}' - **{playmaker['name']}** inicia o ataque! Ele lança para **{attacker['name']}**..."
-            match_log.append(log_entry); embed.set_field_at(1, name="Ao Vivo 🔴", value="```\n" + "\n".join(match_log[-5:]) + "\n```"); await match_message.edit(embed=embed)
-            await asyncio.sleep(2)
-            dribble_success = (attacker['overall'] - defender['overall']) > random.randint(-25, 25)
-            if not dribble_success:
-                log_entry = f"🧱 **{defender['name']}** chega junto e corta a jogada! Que categoria do zagueirão."
-            else:
-                log_entry = f"🏃‍♂️ **{attacker['name']}** passa por **{defender['name']}** e fica de frente pro gol! VAI CHUTAR..."
-                match_log.append(log_entry); embed.set_field_at(1, name="Ao Vivo 🔴", value="```\n" + "\n".join(match_log[-5:]) + "\n```"); await match_message.edit(embed=embed)
-                await asyncio.sleep(2.5)
-                shot_power = attacker['overall'] + random.randint(-10, 10); save_power = keeper['overall'] + random.randint(-15, 15)
-                outcome = random.choices(['goal', 'save', 'post', 'miss', 'penalty'], weights=[35, 30, 10, 15, 10], k=1)[0]
-                if shot_power < save_power and outcome == 'goal': outcome = 'save'
-                if outcome == 'goal':
-                    if random.random() < 0.15:
-                        await asyncio.sleep(2); log_entry = f"⚠️ {minute}' - O VAR está checando um possível impedimento..."
-                        embed.set_field_at(1, name="Ao Vivo 🔴", value="```\n" + "\n".join(match_log + [log_entry]) + "\n```"); await match_message.edit(embed=embed)
-                        await asyncio.sleep(4)
-                        if random.random() < 0.3: log_entry = f"❌ {minute}' - GOL ANULADO! O VAR pegou impedimento de {attacker['name']}!"
-                        else: score[attacker_id] += 1; goalscorers[attacker_id].append(f"{attacker['name']} ({playmaker['name']}) {minute}'"); log_entry = f"✅ {minute}' - GOL CONFIRMADO! É bola na rede!"
-                    else:
-                        score[attacker_id] += 1; goalscorers[attacker_id].append(f"{attacker['name']} ({playmaker['name']}) {minute}'")
-                        prompt = f"Você é um narrador de futebol brasileiro, como Cleber Machado ou Galvão Bueno. Narre um gol de forma empolgante. Marcador do Gol: {attacker['name']}. Jogador que deu a assistência: {playmaker['name']}. Seja criativo e use gírias de futebol."
-                        log_entry = await generate_ai_narration(prompt, f"⚽ GOOOOL! {attacker['name']} marca!")
-                elif outcome == 'save':
-                    prompt = f"Você é um narrador de futebol brasileiro. Narre uma defesa muito difícil e espetacular. Goleiro: {keeper['name']}. Atacante que chutou: {attacker['name']}. Seja criativo."
-                    log_entry = await generate_ai_narration(prompt, f"🧤 QUE DEFESA! {keeper['name']} faz um milagre!")
-                elif outcome == 'post': log_entry = f"💥 NO POSTE! {attacker['name']} carimba a trave! Quase o gol!"
-                elif outcome == 'penalty':
-                    log_entry = f"🚨 PÊNALTI! {defender['name']} derruba {attacker['name']} na área!"; await asyncio.sleep(2)
-                    penalty_shot = attacker['overall'] + random.randint(-5, 5); penalty_save = keeper['overall'] + random.randint(-15, 15)
-                    if penalty_shot > penalty_save:
-                        score[attacker_id] += 1; goalscorers[attacker_id].append(f"{attacker['name']} (P) {minute}'"); log_entry += f"\n⚽ GOOOOL DE PÊNALTI! {attacker['name']} cobra com perfeição!"
-                    else: log_entry += f"\n🧤 DEFENDEU {keeper['name'].upper()}! O goleiro pega o pênalti!"
-                else: log_entry = f"🤦‍♂️ PRA FORA! Que chance perdida por **{attacker['name']}**! Ele isolou a bola!"
-        match_log.append(log_entry)
-        embed.set_field_at(0, name="Placar", value=f"🔵 {score[author.id]} - {score[opponent.id]} 🔴")
-        embed.set_field_at(1, name="Ao Vivo 🔴", value="```\n" + "\n".join(match_log[-5:]) + "\n```")
-        if minute == 45: match_log.append("\n⏸️ **FIM DO PRIMEIRO TEMPO!**\n")
-        await match_message.edit(embed=embed)
-    await asyncio.sleep(3)
-    winner = None
-    if score[author.id] > score[opponent.id]: winner = author
-    elif score[opponent.id] > score[author.id]: winner = opponent
-    final_embed = discord.Embed(title="🏁 FIM DE JOGO 🏁", color=discord.Color.gold())
-    final_embed.add_field(name="Resultado Final", value=f"**{author.display_name} {score[author.id]} x {score[opponent.id]} {opponent.display_name}**", inline=False)
-    if winner:
-        final_embed.description = f"🏆 O grande vencedor é **{winner.mention}**! 🏆"
-        async with data_lock:
-            winner_data = await get_user_data(winner.id)
-            winner_data[str(winner.id)]["wins"] += 1; save_data(USER_DATA_FILE, winner_data)
-    else: final_embed.description = "🤝 A partida terminou em empate! 🤝"
-    author_scorers = ", ".join(goalscorers[author.id]) or "Ninguém"; opp_scorers = ", ".join(goalscorers[opponent.id]) or "Ninguém"
-    final_embed.add_field(name=f"Gols de {author.display_name}", value=author_scorers, inline=True)
-    final_embed.add_field(name=f"Gols de {opponent.display_name}", value=opp_scorers, inline=True)
-    await match_message.edit(embed=final_embed)
-
-# --- COMANDOS DE ADMINISTRADOR ---
-@bot.command(name='money')
-@commands.has_permissions(administrator=True)
-async def give_money(ctx, user: discord.Member, amount: int):
-    if user.bot: return await ctx.send("Você não pode dar dinheiro para um bot.")
-    if amount == 0: return await ctx.send("A quantia não pode ser zero.")
-    async with data_lock:
-        all_data = await get_user_data(user.id)
-        user_id = str(user.id); all_data[user_id]['money'] += amount; save_data(USER_DATA_FILE, all_data)
-    verb = "adicionados" if amount > 0 else "removidos"; new_balance = all_data[str(user.id)]['money']
-    await ctx.send(f"✅ Sucesso! **R$ {abs(amount):,}** foram {verb} para a conta de {user.mention}.\nSaldo atual: R$ {new_balance:,}.")
-
-@give_money.error
-async def give_money_error(ctx, error):
-    if isinstance(error, commands.MissingPermissions): await ctx.send("🚫 Você não tem permissão para usar este comando.")
-    elif isinstance(error, commands.BadArgument): await ctx.send("Uso incorreto. Formato: `--money @usuario <quantia>`")
-    elif isinstance(error, commands.MissingRequiredArgument): await ctx.send("Faltam argumentos. Formato: `--money @usuario <quantia>`")
-
-@bot.command(name='fullreset')
-@commands.has_permissions(administrator=True)
-async def full_reset(ctx):
-    embed = discord.Embed(title="🚨 ALERTA MÁXIMO - RESET TOTAL 🚨", description="**Esta ação é irreversível e apagará TUDO.**\nPara confirmar, digite `EU TENHO CERTEZA E QUERO RESETAR O BOT`.", color=discord.Color.from_rgb(255, 0, 0))
-    await ctx.send(embed=embed)
-    def check(m): return m.author == ctx.author and m.channel == ctx.channel and m.content == "EU TENHO CERTEZA E QUERO RESETAR O BOT"
-    try: await bot.wait_for('message', timeout=60.0, check=check)
-    except asyncio.TimeoutError: return await ctx.send("Tempo esgotado. O reset total foi cancelado.")
-    msg = await ctx.send("💥 **Confirmado.** Iniciando reset total...")
-    async with data_lock:
-        files_deleted = []
-        try:
-            if os.path.exists(USER_DATA_FILE): os.remove(USER_DATA_FILE); files_deleted.append(USER_DATA_FILE)
-            if os.path.exists(CONTRACTED_PLAYERS_FILE): os.remove(CONTRACTED_PLAYERS_FILE); files_deleted.append(CONTRACTED_PLAYERS_FILE)
-        except Exception as e: return await msg.edit(content=f"❌ Erro ao apagar arquivos: {e}")
-    await msg.edit(content=f"🗑️ Arquivos `{', '.join(files_deleted)}` foram apagados.\n\n✅ **RESET TOTAL CONCLUÍDO.**\nÉ altamente recomendável que você **reinicie o bot agora**.")
-
-@full_reset.error
-async def full_reset_error(ctx, error):
-    if isinstance(error, commands.MissingPermissions): await ctx.send("🚫 Você não tem permissão para usar este comando.")
-
-@bot.command(name='bestteam')
-@commands.has_permissions(administrator=True)
-async def best_team(ctx, user: discord.Member):
-    if user.bot: return await ctx.send("Bots não podem ter times.")
-    await ctx.send(f"🤖 Montando o time dos sonhos para {user.mention}... Isso pode levar um momento.")
-    async with data_lock:
-        all_user_data = load_data(USER_DATA_FILE)
-        contracted_players = load_data(CONTRACTED_PLAYERS_FILE)
-        target_user_id = str(user.id)
-        if target_user_id not in all_user_data:
-            all_user_data[target_user_id] = {"squad": [], "team": [None] * 11, "wins": 0, "money": INITIAL_MONEY}
-        current_squad_names = {p['name'] for p in all_user_data[target_user_id].get("squad", [])}
-        contracted_players = [p_name for p_name in contracted_players if p_name not in current_squad_names]
-        all_user_data[target_user_id]['squad'] = []
-        all_user_data[target_user_id]['team'] = [None] * 11
-        new_team = [None] * 11
-        formation_slots = {
-            0: "GOL", 1: "ZAG", 2: "ZAG", 3: "LE", 4: "LD", 5: "VOL", 
-            6: "MC", 7: "MEI", 8: "PE", 9: "PD", 10: "CA"
-        }
-        used_player_names_for_team = set()
-        for slot_index, position in formation_slots.items():
-            candidates = [p for p in ALL_PLAYERS if p['position'] == position and p['name'] not in contracted_players and p['name'] not in used_player_names_for_team]
-            candidates.sort(key=lambda p: p['overall'], reverse=True)
-            if candidates:
-                best_player = candidates[0]
-                new_team[slot_index] = best_player
-                contracted_players.append(best_player['name'])
-                used_player_names_for_team.add(best_player['name'])
-        all_user_data[target_user_id]['team'] = new_team
-        all_user_data[target_user_id]['squad'] = [p for p in new_team if p]
-        save_data(USER_DATA_FILE, all_user_data)
-        save_data(CONTRACTED_PLAYERS_FILE, contracted_players)
-    await ctx.send(f"✅ Time dos sonhos montado para {user.mention}! Use `{BOT_PREFIX}meutime` para ver o resultado.")
-
-@best_team.error
-async def best_team_error(ctx, error):
-    if isinstance(error, commands.MissingPermissions): await ctx.send("🚫 Você não tem permissão para usar este comando.")
-    elif isinstance(error, commands.MissingRequiredArgument): await ctx.send("Uso incorreto. Formato: `--bestteam @usuario`")
 
 # --- EXECUÇÃO DO BOT ---
 if __name__ == "__main__":
