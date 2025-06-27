@@ -1,10 +1,9 @@
 # -*- coding: utf-8 -*-
 # ----------------------------------------------------------------------
-# RafutBot V16 - Edição Cassino Royale (Completo e Corrigido)
+# RafutBot - Versão Definitiva Completa e Corrigida
 # ----------------------------------------------------------------------
-# Esta versão inclui:
-# - Correção final do comando 'confrontar'.
-# - 5 novos jogos de aposta no cassino, todos funcionando.
+# Esta versão inclui todas as funcionalidades e correções para
+# hospedagem persistente e todos os comandos.
 # ----------------------------------------------------------------------
 
 import discord
@@ -25,6 +24,7 @@ import math
 # --- CONFIGURAÇÕES GERAIS ---
 BOT_PREFIX = "--"
 PASTEBIN_URL = "https://pastebin.com/raw/YpjKyzdw"
+# Caminhos de arquivo para persistência no Railway/Render (Volume)
 USER_DATA_FILE = "/data/rafutbot_user_data.json"
 CONTRACTED_PLAYERS_FILE = "/data/rafutbot_contracted_players.json"
 INITIAL_MONEY = 1000000000
@@ -304,6 +304,8 @@ async def on_ready():
     print(f'🚀 {bot.user.name} V16 (Cassino) está no ar!'); fetch_and_parse_players()
     await bot.change_presence(activity=discord.Game(name=f"Use {BOT_PREFIX}help"))
 
+# --- COMANDOS COMPLETOS ---
+
 @bot.command(name='help')
 async def help_command(ctx):
     embed = discord.Embed(title="📜 Comandos do RafutBot 16.0 📜", color=discord.Color.gold())
@@ -335,8 +337,6 @@ async def help_command(ctx):
         embed.add_field(name=f"💰 `{BOT_PREFIX}money @usuario <quantia>`", value="Dá ou remove dinheiro de um usuário.", inline=False)
         embed.add_field(name=f"🚨 `{BOT_PREFIX}fullreset`", value="Apaga TODOS os dados salvos do bot.", inline=False)
     await ctx.send(embed=embed)
-
-# --- COMANDOS COMPLETOS ---
 
 async def generic_bet_handler(ctx, bet, game_logic):
     """Função genérica para lidar com o início de uma aposta."""
