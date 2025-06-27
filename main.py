@@ -3,7 +3,7 @@
 # RafutBot - Versão Definitiva com Visual Moderno
 # ----------------------------------------------------------------------
 # Esta versão inclui todas as funcionalidades, novo prefixo e
-# melhorias visuais nos comandos.
+# melhorias visuais nos comandos (imagem retangular).
 # ----------------------------------------------------------------------
 
 import discord
@@ -90,7 +90,7 @@ async def generate_ai_narration(prompt_text, fallback_text):
         return fallback_text
 
 async def generate_team_image(team_players, user_name):
-    """Gera a imagem do time de forma mais rápida e realista."""
+    """Gera a imagem do time com fotos retangulares e visual moderno."""
     width, height = 700, 900
     dark_green_top = (8, 43, 27)
     dark_green_bottom = (4, 24, 15)
@@ -140,22 +140,27 @@ async def generate_team_image(team_players, user_name):
             
             await asyncio.sleep(0.05)
             
-            # Cria a imagem circular pura, sem borda colorida
-            img_size = (100, 100)
-            mask = Image.new('L', img_size, 0)
-            mask_draw = ImageDraw.Draw(mask)
-            mask_draw.ellipse((0, 0) + img_size, fill=255)
-            player_img = player_img.resize(img_size, Image.Resampling.LANCZOS)
+            # Redimensiona a imagem para um retângulo, mantendo a proporção
+            img_size = (100, 130) 
+            player_img.thumbnail(img_size, Image.Resampling.LANCZOS)
             
-            field_img.paste(player_img, (x - img_size[0] // 2, y - img_size[1] // 2), mask)
+            # Centraliza e cola a imagem retangular
+            paste_x = x - player_img.width // 2
+            paste_y = y - player_img.height // 2
+            field_img.paste(player_img, (paste_x, paste_y), player_img)
 
             player_name_text = player['name'].split(' ')[0]
             player_stats_text = f"OVR {player['overall']}"
             
-            text_box_y = y + 55
-            draw.rounded_rectangle((x - 60, text_box_y, x + 60, text_box_y + 40), radius=5, fill=(0, 0, 0, 128))
-            draw.text((x, text_box_y + 8), player_name_text, font=player_name_font, fill="white", anchor="mt")
-            draw.text((x, text_box_y + 28), player_stats_text, font=player_stats_font, fill="yellow", anchor="mt")
+            text_y = y + 70
+            
+            # Contorno para o nome
+            draw.text((x+1, text_y+1), player_name_text, font=player_name_font, fill="black", anchor="mt", stroke_width=2)
+            draw.text((x, text_y), player_name_text, font=player_name_font, fill="white", anchor="mt")
+
+            # Contorno para os stats
+            draw.text((x+1, text_y + 21), player_stats_text, font=player_stats_font, fill="black", anchor="mt", stroke_width=2)
+            draw.text((x, text_y + 20), player_stats_text, font=player_stats_font, fill="yellow", anchor="mt")
         else:
             draw.rectangle((x - 40, y - 40, x + 40, y + 40), outline=(255,255,255,100), width=2)
             draw.text((x, y), "?", fill=(255,255,255,100), font=title_font, anchor="mm")
@@ -352,7 +357,7 @@ async def compare(ctx, *, query: str):
     try:
         name1, name2 = [normalize_str(n.strip()) for n in query.split(',')]
     except ValueError:
-        return await ctx.send("Formato inválido. Use: `R!comparar <nome1>, <nome2>`")
+        return await ctx.send("Formato inválido. Use: `--comparar <nome1>, <nome2>`")
     user_data = await get_user_data(ctx.author.id)
     squad = user_data[str(ctx.author.id)]['squad']
     p1 = next((p for p in squad if name1 in normalize_str(p['name'])), None)
@@ -411,7 +416,7 @@ async def shop(ctx):
     results = sorted(available, key=lambda p: p['value'], reverse=True)[:10]
     description = "\n".join([f"**{p['name']}** ({p['position']}) - `R$ {p['value']:,}`" for p in results])
     embed = discord.Embed(title="🛒 Top 10 Jogadores da Loja 🛒", description=description, color=discord.Color.dark_gold())
-    embed.set_footer(text=f"Use R!contratar <nome> para buscar e comprar.")
+    embed.set_footer(text=f"Use {BOT_PREFIX}contratar <nome> para buscar e comprar.")
     await ctx.send(embed=embed)
 
 async def perform_escalar(ctx, player):
