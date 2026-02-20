@@ -5,9 +5,10 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "Estou vivo!"
+    return "RafutBot está Online e operando no Supabase!"
 
 def run():
+    # Isso abre a porta que a Render está procurando
     app.run(host='0.0.0.0', port=8080)
 
 def keep_alive():
