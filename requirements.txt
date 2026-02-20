@@ -1,5 +1,5 @@
-Pillow
-discord-py
-flask
+discord.py
+supabase
+python-dotenv
 requests
-google-generativeai
+pillow
