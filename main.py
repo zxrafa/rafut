@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-RafutBot - Versão 20.0 (Completa e Funcional - Supabase Edition)
+RafutBot - Versão 20.0 (Completa e Funcional - Supabase + Render Fix)
 ----------------------------------------------------------------------
 Sem IA, Embeds Bonitos, `.env` configurado e 100% dos comandos originais.
 """
@@ -8,34 +8,31 @@ Sem IA, Embeds Bonitos, `.env` configurado e 100% dos comandos originais.
 import discord
 from discord.ext import commands
 import requests
+import json
 import os
 import random
 import re
 import asyncio
 import unicodedata
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from io import BytesIO
 from datetime import datetime, timedelta
 
-# --- CARREGAMENTO DO .ENV E SUPABASE ---
+# --- CARREGAMENTO DO .ENV ---
 from dotenv import load_dotenv
-from supabase import create_client
-
 load_dotenv()
 
-# Conexão com o Supabase
+# --- KEEP ALIVE PARA RENDER ---
+# Aqui foi tirado o try/except para forçar a Render a executar o arquivo
+from keep_alive import keep_alive
+
+# --- CONEXÃO SUPABASE ---
 URL = os.getenv("SUPABASE_URL")
 KEY = os.getenv("SUPABASE_KEY")
 if URL and KEY:
     supabase = create_client(URL, KEY)
 else:
     print("❌ ERRO: Variáveis SUPABASE_URL ou SUPABASE_KEY não encontradas no .env!")
-
-# --- KEEP ALIVE PARA RENDER/REPLIT ---
-try:
-    from keep_alive import keep_alive
-except ImportError:
-    def keep_alive(): pass
 
 # --- CONFIGURAÇÕES GERAIS ---
 BOT_PREFIX = "--"
@@ -64,14 +61,14 @@ NEWS_TEMPLATES = [
     "👀 MERCADO DA BOLA: Rumores indicam que {player} gastou todo seu salário comprando skins de joguinho."
 ]
 GOAL_NARRATIONS = [
-    "⚽ GOOOOLAAAAÇO! {attacker} mandou uma bomba do meio da rua!",
-    "⚽ É REDE! {attacker} dribla dois zagueiros e empurra pro gol vazio!",
-    "⚽ GOOOOL! {attacker} recebe cruzamento na medida e testa firme!"
+    "⚽ GOOOOLAAAAÇO! {attacker} mandou uma bomba do meio da rua! O goleiro nem viu a cor da bola!",
+    "⚽ É REDE! {attacker} dribla dois zagueiros, deixa o goleiro no chão e empurra pro gol vazio! Gênio!",
+    "⚽ GOOOOL! {attacker} recebe cruzamento na medida e testa firme pro fundo das redes! Que testada!"
 ]
 SAVE_NARRATIONS = [
-    "🧤 MILAAAAGRE! {keeper} voa como um gato no ângulo e espalma a bola pra escanteio!",
+    "🧤 MILAAAAGRE! {keeper} voa como um gato no ângulo e espalma a bola pra escanteio! Defesaça!",
     "🧤 INCRÍVEL! O atacante bateu à queima-roupa, mas {keeper} salvou no reflexo com os pés!",
-    "🧱 PAREDE! {keeper} fecha o ângulo e defende a bomba de peito!"
+    "🧱 PAREDE! {keeper} fecha o ângulo e defende a bomba de peito! É um monstro na pequena área!"
 ]
 
 ACHIEVEMENTS = {
@@ -84,6 +81,28 @@ ACHIEVEMENTS = {
     "sorte_de_tigre": {"name": "Sorte de Tigre", "desc": "Ganhe o Jackpot no Tigrinho.", "emoji": "🐯"},
 }
 
+DAILY_CHALLENGES = [
+    {"id": "vencer_partida", "desc": "Vença uma partida contra outro jogador.", "reward": 15000000},
+    {"id": "marcar_gol", "desc": "Marque pelo menos um gol em uma partida.", "reward": 5000000},
+    {"id": "jogar_partida", "desc": "Jogue uma partida, ganhando ou perdendo.", "reward": 7500000},
+    {"id": "contratar_jogador", "desc": "Contrate um novo jogador no mercado.", "reward": 4000000},
+]
+
+# --- FUNÇÕES DE EMBED (Beleza e Padronização) ---
+def create_embed(title, description="", color=discord.Color.blurple(), ctx=None):
+    embed = discord.Embed(title=title, description=description, color=color)
+    if ctx:
+        embed.set_footer(text=f"Requisitado por {ctx.author.display_name} • RafutBot V20", icon_url=ctx.author.avatar.url if ctx.author.avatar else None)
+    else:
+        embed.set_footer(text="RafutBot V20 • Central Administrativa")
+    return embed
+
+def create_error_embed(message, ctx=None):
+    return create_embed("❌ Erro na Operação", f"> {message}", discord.Color.red(), ctx)
+
+def create_success_embed(title, message, ctx=None):
+    return create_embed(f"✅ {title}", f"> {message}", discord.Color.green(), ctx)
+
 # --- FUNÇÕES DE BANCO DE DADOS (SUPABASE) ---
 async def get_user_data(user_id):
     uid = str(user_id)
@@ -92,33 +111,21 @@ async def get_user_data(user_id):
     if not res.data:
         initial = {
             "money": INITIAL_MONEY, "squad": [], "team": [None] * 11, "wins": 0,
-            "last_daily": "2000-01-01T00:00:00", "club_name": None, "stadium_level": 1,
-            "match_history": [], "achievements": [], "contracted_players": []
+            "last_daily": "2000-01-01T00:00:00", "club_name": None, "club_logo": None, 
+            "stadium_level": 1, "match_history": [], "achievements": [], "contracted_players": []
         }
         supabase.table("jogadores").insert({"id": uid, "data": initial}).execute()
         return initial
     
     data = res.data[0]["data"]
     # Atualiza perfis antigos caso falte chaves novas
-    for key, val in [("stadium_level", 1), ("club_name", None), ("achievements", []), ("match_history", []), ("contracted_players", [])]:
+    for key, val in [("stadium_level", 1), ("club_name", None), ("club_logo", None), ("achievements", []), ("match_history", []), ("contracted_players", [])]:
         if key not in data: data[key] = val
     return data
 
 async def save_user_data(user_id, data):
-    supabase.table("jogadores").update({"data": data}).eq("id", str(user_id)).execute()
-
-# --- FUNÇÕES DE EMBED (Beleza e Padronização) ---
-def create_embed(title, description="", color=discord.Color.blurple(), ctx=None):
-    embed = discord.Embed(title=title, description=description, color=color)
-    if ctx:
-        embed.set_footer(text=f"Requisitado por {ctx.author.display_name} • RafutBot V20", icon_url=ctx.author.avatar.url if ctx.author.avatar else None)
-    return embed
-
-def create_error_embed(message, ctx=None):
-    return create_embed("❌ Erro na Operação", f"> {message}", discord.Color.red(), ctx)
-
-def create_success_embed(title, message, ctx=None):
-    return create_embed(f"✅ {title}", f"> {message}", discord.Color.green(), ctx)
+    uid = str(user_id)
+    supabase.table("jogadores").update({"data": data}).eq("id", uid).execute()
 
 # --- FUNÇÕES AUXILIARES ---
 def normalize_str(s):
@@ -235,6 +242,7 @@ async def generate_team_image(team_players, user):
     club_logo = user_data.get('club_logo')
     return await asyncio.to_thread(create_team_image_sync, team_players, club_name, club_logo)
 
+
 # --- VIEWS (BOTÕES INTERATIVOS) ---
 class KeepOrSellView(discord.ui.View):
     def __init__(self, author, player):
@@ -293,10 +301,15 @@ class ContractView(discord.ui.View):
             data = await get_user_data(self.ctx.author.id)
             if p['name'] in data.get("contracted_players", []): return await inter.response.send_message("❌ Jogador já foi contratado!", ephemeral=True)
             if data['money'] < p['value']: return await inter.response.send_message("💸 Dinheiro insuficiente!", ephemeral=True)
-            data['money'] -= p['value']; data['squad'].append(add_player_defaults(p)); data['contracted_players'].append(p['name'])
+            
+            data['money'] -= p['value']
+            data['squad'].append(add_player_defaults(p))
+            data['contracted_players'].append(p['name'])
             await save_user_data(self.ctx.author.id, data)
+            
         for c in self.children: c.disabled = True
-        emb = await self.create_embed(); emb.color = discord.Color.green(); emb.title = "✅ Contratado com Sucesso!"
+        emb = await self.create_embed()
+        emb.color = discord.Color.green(); emb.title = "✅ Contratado com Sucesso!"
         await inter.response.edit_message(embed=emb, view=self)
         await self.ctx.send(f"🎉 Parabéns {self.ctx.author.mention}, **{p['name']}** é do seu time!")
         await check_and_grant_achievement(self.ctx.author.id, "contratar_jogador", self.ctx)
@@ -348,7 +361,7 @@ class RocketView(discord.ui.View):
 # --- EVENTOS ---
 @bot.event
 async def on_ready():
-    print(f'🚀 {bot.user.name} V20.0 está no ar!')
+    print(f'🚀 {bot.user.name} V20.0 está no ar com SUPABASE e FLASK!')
     fetch_and_parse_players()
     await bot.change_presence(activity=discord.Game(name=f"Use {BOT_PREFIX}help"))
 
@@ -366,10 +379,10 @@ async def on_command_error(ctx, error):
 async def help_command(ctx):
     embed = create_embed("📜 Central de Comandos RafutBot 📜", "Seu guia definitivo para dominar os campos.", discord.Color.gold(), ctx)
     embed.add_field(name="💰 Dinheiro & Recompensas", value=f"`{BOT_PREFIX}daily`, `{BOT_PREFIX}saldo`, `{BOT_PREFIX}doar`, `{BOT_PREFIX}estadio`", inline=False)
-    embed.add_field(name="🛒 Mercado da Bola", value=f"`{BOT_PREFIX}contratar`, `{BOT_PREFIX}vender`, `{BOT_PREFIX}mercadolivre`, `{BOT_PREFIX}destaques`", inline=False)
-    embed.add_field(name="📋 Gestão do Clube", value=f"`{BOT_PREFIX}escalar`, `{BOT_PREFIX}banco`, `{BOT_PREFIX}elenco`, `{BOT_PREFIX}meutime`, `{BOT_PREFIX}treinar`, `{BOT_PREFIX}apelido`, `{BOT_PREFIX}clubinfo`", inline=False)
-    embed.add_field(name="⚽ Confrontos & Rankings", value=f"`{BOT_PREFIX}confrontar`, `{BOT_PREFIX}perfil`, `{BOT_PREFIX}conquistas`", inline=False)
-    embed.add_field(name="🎲 Cassino & Sorte", value=f"`{BOT_PREFIX}tigrinho`, `{BOT_PREFIX}rocket`, `{BOT_PREFIX}obter`, `{BOT_PREFIX}noticias`", inline=False)
+    embed.add_field(name="🛒 Mercado da Bola", value=f"`{BOT_PREFIX}contratar`, `{BOT_PREFIX}mercadolivre`, `{BOT_PREFIX}destaques`, `{BOT_PREFIX}obter`", inline=False)
+    embed.add_field(name="📋 Gestão do Clube", value=f"`{BOT_PREFIX}escalar`, `{BOT_PREFIX}elenco`, `{BOT_PREFIX}meutime`", inline=False)
+    embed.add_field(name="⚽ Confrontos & Rankings", value=f"`{BOT_PREFIX}confrontar`, `{BOT_PREFIX}perfil`", inline=False)
+    embed.add_field(name="🎲 Cassino & Sorte", value=f"`{BOT_PREFIX}tigrinho`, `{BOT_PREFIX}rocket`, `{BOT_PREFIX}noticias`", inline=False)
     await ctx.send(embed=embed)
 
 @bot.command(name='perfil')
@@ -390,13 +403,17 @@ async def perfil(ctx, user: discord.Member = None):
     embed.add_field(name="🏆 Vitórias", value=f"`{data['wins']} ({win_rate:.1f}%)`", inline=True)
     embed.add_field(name="⭐ Overall do Time", value=f"`{team_ovr}`", inline=True)
     embed.add_field(name="🎽 Tamanho do Elenco", value=f"`{len(data['squad'])} atletas`", inline=True)
-    embed.add_field(name="🏟️ Nível do Estádio", value=f"`{data['stadium_level']}`", inline=True)
+    embed.add_field(name="🏟️ Nível do Estádio", value=f"`{data.get('stadium_level', 1)}`", inline=True)
+    
+    last_match = data['match_history'][-1] if data['match_history'] else "Nenhuma partida jogada."
+    embed.add_field(name="📜 Última Partida", value=f"> {last_match}", inline=False)
     await ctx.send(embed=embed)
 
 # --- COMANDOS DE ECONOMIA ---
 @bot.command(name='saldo')
 async def balance(ctx):
-    data = await get_user_data(ctx.author.id); money = data['money']
+    data = await get_user_data(ctx.author.id)
+    money = data['money']
     await ctx.send(embed=create_embed("Extrato Bancário", f"💰 Você possui **R$ {money:,}** na sua conta.", discord.Color.green(), ctx))
 
 @bot.command(name='daily')
@@ -425,22 +442,31 @@ async def doar(ctx, target: discord.Member, amount: int):
     if ctx.author == target: return await ctx.send(embed=create_error_embed("Não pode doar para si mesmo.", ctx))
     if amount <= 0: return await ctx.send(embed=create_error_embed("Valor inválido.", ctx))
     async with data_lock:
-        data_sender = await get_user_data(ctx.author.id)
-        if data_sender['money'] < amount: return await ctx.send(embed=create_error_embed("Saldo insuficiente.", ctx))
-        data_receiver = await get_user_data(target.id) 
-        data_sender['money'] -= amount
-        data_receiver['money'] += amount
-        await save_user_data(ctx.author.id, data_sender)
-        await save_user_data(target.id, data_receiver)
+        data_s = await get_user_data(ctx.author.id)
+        if data_s['money'] < amount: return await ctx.send(embed=create_error_embed("Saldo insuficiente.", ctx))
+        data_t = await get_user_data(target.id) 
+        data_s['money'] -= amount
+        data_t['money'] += amount
+        await save_user_data(ctx.author.id, data_s)
+        await save_user_data(target.id, data_t)
     await ctx.send(embed=create_success_embed("Transferência PIX Concluída", f"💸 **{ctx.author.display_name}** enviou **R$ {amount:,}** para **{target.display_name}**!", ctx))
 
 # --- COMANDOS DE MERCADO ---
+@bot.command(name='mercadolivre')
+async def free_agents(ctx):
+    data = await get_user_data(ctx.author.id)
+    livres = [p for p in ALL_PLAYERS if p['value'] <= 1000000 and p['name'] not in data.get("contracted_players", [])]
+    if not livres: return await ctx.send(embed=create_error_embed("Não há jogadores baratos disponíveis.", ctx))
+    random.shuffle(livres)
+    emb = create_embed("🛒 Mercado Livre - Jogadores Básicos", "Reforços baratos para começar:", discord.Color.light_grey(), ctx)
+    for p in livres[:5]:
+        emb.add_field(name=p['name'], value=f"`{p['position']}` | OVR: {p['overall']} | R$ {p['value']:,}", inline=False)
+    await ctx.send(embed=emb)
+
 @bot.command(name='destaques')
 async def destaques(ctx):
-    # Pega todos os jogadores já contratados por alguém no banco para não mostrar aqui
-    # Como as tabelas são por usuário, precisamos iterar. Para otimizar, mostramos apenas os globais.
     top5 = sorted(ALL_PLAYERS, key=lambda p: p['overall'], reverse=True)[:5]
-    emb = create_embed("🔥 Destaques Globais", "Os 5 melhores do jogo:", discord.Color.orange(), ctx)
+    emb = create_embed("🔥 Destaques Globais", "Os 5 melhores jogadores do jogo:", discord.Color.orange(), ctx)
     for p in top5:
         emb.add_field(name=f"💎 {p['name']} (OVR {p['overall']})", value=f"Pos: `{p['position']}` | Preço: `R$ {p['value']:,}`", inline=False)
     await ctx.send(embed=emb)
@@ -480,7 +506,7 @@ async def squad_command(ctx):
     for p in sorted(squad, key=lambda p: p['name']):
         p = add_player_defaults(p)
         lines.append(f"**{p.get('nickname') or p['name']}** | `{p['position']}` | OVR: **{get_player_effective_overall(p)}**")
-    emb.description = "\n".join(lines[:25]) # Limite de exibição
+    emb.description = "\n".join(lines[:20]) # Limitado para n estourar o chat
     await ctx.send(embed=emb)
 
 @bot.command(name='meutime')
@@ -520,7 +546,7 @@ async def set_player(ctx, *, query: str):
 # --- COMANDOS DE DIVERSÃO / CASSINO ---
 @bot.command(name='noticias')
 async def news(ctx):
-    data = await get_user_data(ctx.author.id); squad = data.get('squad')
+    data = await get_user_data(ctx.author.id); squad = data.get('squad', [])
     if not squad: return await ctx.send(embed=create_error_embed("Você precisa ter jogadores para gerar notícias!", ctx))
     p = random.choice(squad)
     headline = random.choice(NEWS_TEMPLATES).format(player=p.get('nickname') or p['name'])
@@ -583,7 +609,6 @@ async def rocket_game(ctx, bet: int):
     emb.title = "💥 EXPLODIU!"; emb.color = discord.Color.red(); emb.description = f"Crash em **{mult:.2f}x**\nPerdeu **R$ {bet:,}**."
     await msg.edit(embed=emb, view=None)
 
-
 # --- PARTIDAS E CONFRONTOS ---
 @bot.command(name='confrontar')
 async def confront(ctx, opp: discord.Member):
@@ -610,7 +635,6 @@ async def confront(ctx, opp: discord.Member):
         await asyncio.sleep(2.5)
         atk, dfn = (p1, p2) if random.random() > 0.5 else (p2, p1)
         
-        # Correção para caso a zaga ou ataque estejam vazios por escalação bizarra
         if not atk["att"] or not dfn["def"]: continue
         
         attacker = random.choice(atk["att"]); defender = random.choice(dfn["def"]); gk = dfn["gk"]
@@ -630,22 +654,22 @@ async def confront(ctx, opp: discord.Member):
     await asyncio.sleep(2)
     win_str = f"🏆 Vitória de **{p1['name'] if p1['score'] > p2['score'] else p2['name']}**!" if p1["score"] != p2["score"] else "🤝 Empate Técnico!"
     
-    # Salvar Stats Básicas
     async with data_lock:
-        data1 = await get_user_data(ctx.author.id)
-        data2 = await get_user_data(opp.id)
+        data1 = await get_user_data(ctx.author.id); data2 = await get_user_data(opp.id)
         data1["match_history"].append(f"{p1['score']}x{p2['score']} vs {p2['name']}")
         data2["match_history"].append(f"{p2['score']}x{p1['score']} vs {p1['name']}")
         if p1["score"] > p2["score"]: data1["wins"] += 1
         elif p2["score"] > p1["score"]: data2["wins"] += 1
-        await save_user_data(ctx.author.id, data1)
-        await save_user_data(opp.id, data2)
+        await save_user_data(ctx.author.id, data1); await save_user_data(opp.id, data2)
 
     final_emb = create_embed("🏁 FIM DE JOGO 🏁", f"### {p1['name']} {p1['score']} x {p2['score']} {p2['name']}\n\n> {win_str}", discord.Color.gold(), ctx)
     await msg.edit(embed=final_emb)
 
 # --- INICIAR BOT ---
 if __name__ == "__main__":
+    # ESSA É A LINHA MÁGICA QUE SALVA O BOT NA RENDER
+    keep_alive() 
+    
     token = os.getenv("DISCORD_TOKEN")
     if token: 
         bot.run(token)
